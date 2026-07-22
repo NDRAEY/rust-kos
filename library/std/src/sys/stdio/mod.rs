@@ -17,6 +17,10 @@ cfg_select! {
         mod motor;
         pub use motor::*;
     }
+    target_os = "kolibri" => {
+        mod kolibri;
+        pub use kolibri::*;
+    }
     target_os = "solid_asp3" => {
         mod solid;
         pub use solid::*;

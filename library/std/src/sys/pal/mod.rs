@@ -20,6 +20,10 @@ cfg_select! {
         mod hermit;
         pub use self::hermit::*;
     }
+    target_os = "kolibri" => {
+        mod kolibri;
+        pub use self::kolibri::*;
+    }
     target_os = "motor" => {
         mod motor;
         pub use self::motor::*;

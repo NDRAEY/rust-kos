@@ -151,6 +151,9 @@ pub fn exit(code: i32) -> ! {
         target_os = "windows" => {
             unsafe { crate::sys::pal::c::ExitProcess(code as u32) }
         }
+        target_os = "kolibri" => {
+            crate::sys::pal::api::exit(code as u32);
+        }
         target_os = "xous" => {
             crate::os::xous::ffi::exit(code as u32)
         }

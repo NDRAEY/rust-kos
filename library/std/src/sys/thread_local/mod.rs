@@ -27,6 +27,7 @@ cfg_select! {
     any(
         all(target_family = "wasm", not(target_feature = "atomics")),
         target_os = "uefi",
+        target_os = "kolibri",
         target_os = "zkvm",
         target_os = "trusty",
         target_os = "vexos",
@@ -97,6 +98,7 @@ pub(crate) mod guard {
                 all(target_os = "wasi", target_env = "p1", target_feature = "atomics")
             )),
             target_os = "uefi",
+            target_os = "kolibri",
             target_os = "zkvm",
             target_os = "trusty",
             target_os = "vexos",

@@ -133,3 +133,11 @@ pub(super) fn pre_wasi_self_contained() -> CrtObjects {
 pub(super) fn post_wasi_self_contained() -> CrtObjects {
     new(&[])
 }
+
+pub(super) fn pre_kolibri() -> CrtObjects {
+    new(&[])
+}
+
+pub(super) fn post_kolibri() -> CrtObjects {
+    new(&[])
+}

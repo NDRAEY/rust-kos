@@ -630,6 +630,7 @@ fn human_readable_target_os(os: Symbol) -> Option<&'static str> {
         Hurd => "GNU/Hurd",
         IOs => "iOS",
         Illumos => "illumos",
+        Kolibri => "Kolibri",
         L4Re => "L4Re",
         Linux => "Linux",
         LynxOs178 => "LynxOS-178",

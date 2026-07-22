@@ -1576,6 +1576,8 @@ supported_targets! {
     ("riscv64gc-unknown-redox", riscv64gc_unknown_redox),
     ("x86_64-unknown-redox", x86_64_unknown_redox),
 
+    ("i586-unknown-kolibri", i586_unknown_kolibri),
+
     ("x86_64-unknown-managarm-mlibc", x86_64_unknown_managarm_mlibc),
     ("aarch64-unknown-managarm-mlibc", aarch64_unknown_managarm_mlibc),
     ("riscv64gc-unknown-managarm-mlibc", riscv64gc_unknown_managarm_mlibc),
@@ -1990,6 +1992,7 @@ crate::target_spec_enum! {
         Hurd = "hurd",
         Illumos = "illumos",
         IOs = "ios",
+        Kolibri = "kolibri",
         L4Re = "l4re",
         Linux = "linux",
         LynxOs178 = "lynxos178",

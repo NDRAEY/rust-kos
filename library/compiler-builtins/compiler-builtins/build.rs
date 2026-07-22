@@ -37,6 +37,7 @@ fn main() {
         || cfg.target_triple.contains("nvptx")
         || cfg.target_triple.contains("uefi")
         || cfg.target_triple.contains("xous")
+        || cfg.target_triple.contains("kolibri")
     {
         println!("cargo:rustc-cfg=feature=\"mem\"");
     }
