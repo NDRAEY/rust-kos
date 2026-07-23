@@ -1382,6 +1382,35 @@ fn link_natively(
         }
     }
 
+    // Make a .kex file from ELF by using `objcopy`.
+
+    // I know this is a stub.
+    // The solution could be to pass `i586-kolibri-ld` linker name in target spec, but it needs binutils dependency from `KolibriOS/ports` repo.
+    // Since modern compilers (like GCC 16+ / Clang 22+) CAN'T compile KolibriOS SDK, I have to make this workaround.
+    
+    // TODO: Make `sess.target.is_like_menuet` flag?
+    if sess.target.os == rustc_target::spec::Os::Kolibri {
+        let objcopy = "rust-objcopy";
+        
+        let input_fname = out_filename.to_str().unwrap();
+        let output_kex_fname = input_fname.to_owned() + ".kex";
+
+        let mut command = std::process::Command::new(objcopy);
+        
+        command.args(&[input_fname, "-O", "binary", &output_kex_fname]);
+        
+        match command.output() {
+            Ok(_) => (),
+            Err(error) => {
+                sess.dcx().emit_fatal(diagnostics::UnableToRun { util: "objcopy", error })
+            },
+        }
+
+        if let Err(e) = std::fs::rename(output_kex_fname, input_fname) {
+            sess.dcx().emit_fatal(diagnostics::FailedToWrite { path: input_fname.into(), error: e });
+        }
+    }
+
     if sess.target.is_like_solaris {
         // Many illumos systems will have both the native 'strip' utility and
         // the GNU one. Use the native version explicitly and do not rely on

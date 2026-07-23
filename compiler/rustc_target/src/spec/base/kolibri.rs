@@ -25,6 +25,8 @@ pub(crate) fn opts() -> TargetOptions {
         linker: Some("ld.lld".into()),
         linker_flavor: LinkerFlavor::Gnu(Cc::No, Lld::Yes),
 
+        exe_suffix: ".kex".into(),
+
         ..Default::default()
     }
 }
