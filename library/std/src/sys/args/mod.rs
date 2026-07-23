@@ -21,6 +21,10 @@ cfg_select! {
         mod unix;
         pub use unix::*;
     }
+    target_os = "kolibri" => {
+        mod kolibri;
+        pub use kolibri::*;
+    }
     target_family = "windows" => {
         mod windows;
         pub use windows::*;
