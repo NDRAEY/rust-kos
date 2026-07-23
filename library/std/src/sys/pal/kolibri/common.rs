@@ -1,5 +1,7 @@
 use crate::io as std_io;
 
+use crate::fmt::Write;
+
 unsafe extern "C" {
     fn main();
 }
@@ -17,7 +19,18 @@ pub extern "C" fn _start() -> ! {
 // SAFETY: must be called only once during runtime initialization.
 // NOTE: this is not guaranteed to run, for example when Rust code is called externally.
 pub unsafe fn init(_argc: isize, _argv: *const *const u8, _sigpipe: u8) {
-    super::api::debugboard_write_str("WARNING/TODO: Initializer function called. Implement it to use `std::env::args()`\n");
+    super::api::debugboard_write_str(
+        "WARNING/TODO: Initializer function called. Implement it to use `std::env::args()`\n",
+    );
+
+    writeln!(
+        super::api::debugboard(),
+        "Application path: {:?}",
+        super::application_path()
+    )
+    .ok();
+
+    writeln!(super::api::debugboard(), "Cmdline at: {:?}", super::command_line()).ok();
 }
 
 // SAFETY: must be called only once during runtime cleanup.

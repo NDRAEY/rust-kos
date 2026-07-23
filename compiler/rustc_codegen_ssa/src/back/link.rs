@@ -1393,7 +1393,13 @@ fn link_natively(
         let objcopy = "rust-objcopy";
         
         let input_fname = out_filename.to_str().unwrap();
+        let input_fname_elf = out_filename.to_str().unwrap().to_owned() + ".elf";
         let output_kex_fname = input_fname.to_owned() + ".kex";
+
+        // Save original ELF for debugging purposes.
+        if let Err(e) = std::fs::copy(input_fname, input_fname_elf) {
+            sess.dcx().emit_fatal(diagnostics::FailedToWrite { path: input_fname.into(), error: e });
+        }
 
         let mut command = std::process::Command::new(objcopy);
         
@@ -1406,6 +1412,7 @@ fn link_natively(
             },
         }
 
+        // Replace real .kex file with its impostor.
         if let Err(e) = std::fs::rename(output_kex_fname, input_fname) {
             sess.dcx().emit_fatal(diagnostics::FailedToWrite { path: input_fname.into(), error: e });
         }

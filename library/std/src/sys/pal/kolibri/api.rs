@@ -2,13 +2,10 @@ use super::syscall::*;
 
 #[inline]
 pub fn exit(_code: u32) -> ! {
-    unsafe {
-        syscall1(0xffff_ffff)
-    };
+    unsafe { syscall1(0xffff_ffff) };
 
     loop {}
 }
-
 
 #[inline]
 pub fn init_heap() {
@@ -27,7 +24,6 @@ pub fn free(ptr: *const u8) {
     }
 }
 
-
 #[inline]
 pub fn debugboard_write(byte: u8) {
     unsafe { syscall3(63, 1, byte as _) };
@@ -43,4 +39,20 @@ pub fn debugboard_write_bulk(data: &[u8]) {
 #[inline]
 pub fn debugboard_write_str(data: &str) {
     debugboard_write_bulk(data.as_bytes());
+}
+
+pub struct DebugBoard;
+
+impl crate::fmt::Write for DebugBoard {
+    fn write_str(&mut self, s: &str) -> crate::fmt::Result {
+        for i in s.bytes() {
+            debugboard_write(i);
+        }
+
+        Ok(())
+    }
+}
+
+pub fn debugboard() -> DebugBoard {
+    DebugBoard
 }
