@@ -570,6 +570,15 @@ pub(crate) struct StrippingDebugInfoFailed<'a> {
 }
 
 #[derive(Diagnostic)]
+#[diag("failed to run utility `{$util}`: {$status}")]
+#[note("{$output}")]
+pub(crate) struct UtilityFailedWithError<'a> {
+    pub util: &'a str,
+    pub status: ExitStatus,
+    pub output: String,
+}
+
+#[derive(Diagnostic)]
 #[diag("unable to run `{$util}`: {$error}")]
 pub(crate) struct UnableToRun<'a> {
     pub util: &'a str,

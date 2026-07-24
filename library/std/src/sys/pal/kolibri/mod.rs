@@ -6,6 +6,7 @@ pub use common::*;
 
 pub mod api;
 pub mod dll;
+pub mod sbrk;
 
 mod syscall;
 
@@ -31,15 +32,16 @@ fn command_line_raw() -> *const crate::ffi::c_char {
 
 /// Returns application path
 /// Note: Application path that is being stored in app has following encoding:
-///       u8; str.
-///       ^   ^-- The path itself.
+///       u16; str.
+///       ^    ^-- The path itself.
 ///       `-- Encoding byte: 01 = CP866; 02 = UTF16-LE; 03 = UTF-8
 /// For more info: https://wiki.kolibrios.org/wiki/SysFn70/ru (in Russian!)
 pub fn application_path() -> &'static CStr {
-    unsafe { CStr::from_ptr(application_path_raw().byte_add(1)) }
+    unsafe { CStr::from_ptr(application_path_raw().byte_add(2)) }
 }
 
 /// Returns a string containing raw command line arguments (without split and without argv[0] which is an application path, see function above).
 pub fn command_line() -> &'static CStr {
     unsafe { CStr::from_ptr(command_line_raw()) }
 }
+

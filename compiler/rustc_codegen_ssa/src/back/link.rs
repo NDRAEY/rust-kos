@@ -1387,35 +1387,55 @@ fn link_natively(
     // I know this is a stub.
     // The solution could be to pass `i586-kolibri-ld` linker name in target spec, but it needs binutils dependency from `KolibriOS/ports` repo.
     // Since modern compilers (like GCC 16+ / Clang 22+) CAN'T compile KolibriOS SDK, I have to make this workaround.
-    
+
     // TODO: Make `sess.target.is_like_menuet` flag?
     if sess.target.os == rustc_target::spec::Os::Kolibri {
         let objcopy = "rust-objcopy";
-        
+
         let input_fname = out_filename.to_str().unwrap();
-        let input_fname_elf = out_filename.to_str().unwrap().to_owned() + ".elf";
+        let input_fname_elf = input_fname.to_owned() + ".elf";
         let output_kex_fname = input_fname.to_owned() + ".kex";
 
         // Save original ELF for debugging purposes.
-        if let Err(e) = std::fs::copy(input_fname, input_fname_elf) {
-            sess.dcx().emit_fatal(diagnostics::FailedToWrite { path: input_fname.into(), error: e });
+        if let Err(e) = std::fs::copy(input_fname, &input_fname_elf) {
+            sess.dcx()
+                .emit_fatal(diagnostics::FailedToWrite { path: input_fname.into(), error: e });
         }
+
+        info!("kolibri: ELF saved okay: {} -> {}", input_fname, &input_fname_elf);
 
         let mut command = std::process::Command::new(objcopy);
-        
-        command.args(&[input_fname, "-O", "binary", &output_kex_fname]);
-        
+
+        command.args(&[&input_fname, "-O", "binary", &output_kex_fname]);
+
         match command.output() {
-            Ok(_) => (),
+            Ok(o) => {
+                info!("objcopy stdout: {:?}", String::from_utf8_lossy(&o.stdout));
+
+                if !o.status.success() {
+                    info!("objcopy stderr: {:?}", String::from_utf8_lossy(&o.stderr));
+
+                    sess.dcx().emit_fatal(diagnostics::UtilityFailedWithError {
+                        util: objcopy,
+                        status: o.status,
+                        output: escape_string(&o.stderr),
+                    })
+                }
+            }
             Err(error) => {
                 sess.dcx().emit_fatal(diagnostics::UnableToRun { util: "objcopy", error })
-            },
+            }
         }
 
+        info!("kolibri: objcopy okay {} -> {}", &input_fname, &output_kex_fname);
+
         // Replace real .kex file with its impostor.
-        if let Err(e) = std::fs::rename(output_kex_fname, input_fname) {
-            sess.dcx().emit_fatal(diagnostics::FailedToWrite { path: input_fname.into(), error: e });
+        if let Err(e) = std::fs::rename(&output_kex_fname, &input_fname) {
+            sess.dcx()
+                .emit_fatal(diagnostics::FailedToWrite { path: input_fname.into(), error: e });
         }
+
+        info!("kolibri: replace okay {} -> {}", output_kex_fname, input_fname);
     }
 
     if sess.target.is_like_solaris {

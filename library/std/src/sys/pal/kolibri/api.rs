@@ -13,12 +13,17 @@ pub fn init_heap() {
 }
 
 #[inline]
-pub fn alloc(size: usize) -> *const u8 {
-    unsafe { crate::ptr::with_exposed_provenance(syscall3(68, 12, size)) }
+pub fn alloc(size: usize) -> *mut u8 {
+    unsafe { crate::ptr::with_exposed_provenance_mut(syscall3(68, 12, size)) }
 }
 
 #[inline]
-pub fn free(ptr: *const u8) {
+pub fn realloc(ptr: *mut u8, size: usize) -> *mut u8 {
+    unsafe { crate::ptr::with_exposed_provenance_mut(syscall4(68, 20, ptr.addr() as _, size)) }
+}
+
+#[inline]
+pub fn free(ptr: *mut u8) {
     unsafe {
         syscall3(68, 13, ptr.addr() as _);
     }

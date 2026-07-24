@@ -27,15 +27,15 @@ pub unsafe fn syscall3(nr: usize, p1: usize, p2: usize) -> usize {
     result
 }
 
-// pub unsafe fn syscall4(nr: usize, p1: usize, p2: usize, p3: usize) -> usize {
-//     let mut result = 0;
+pub unsafe fn syscall4(nr: usize, p1: usize, p2: usize, p3: usize) -> usize {
+    let mut result = 0;
 
-//     unsafe {
-//         crate::arch::asm!("int 0x40", in("eax") nr, in("ebx") p1, in("ecx") p2, in("edx") p3, lateout("eax") result)
-//     };
+    unsafe {
+        crate::arch::asm!("int 0x40", in("eax") nr, in("ebx") p1, in("ecx") p2, in("edx") p3, lateout("eax") result)
+    };
 
-//     result
-// }
+    result
+}
 
 /*
 pub unsafe fn syscall5(nr: usize, p1: usize, p2: usize, p3: usize, p4: usize) -> usize {

@@ -1,11 +1,8 @@
 use crate::ffi::OsString;
 use crate::fmt;
 
-use core::iter::{Chain, Once};
-use core::str::Split;
-
 pub struct Args {
-    it: Chain<Once<&'static str>, Split<'static, char>>
+    args: crate::vec::IntoIter<OsString>
 }
 
 pub fn args() -> Args {
@@ -15,10 +12,17 @@ pub fn args() -> Args {
     let args = crate::sys::pal::command_line().to_str().unwrap();
     
     // TODO: Do proper parsing of \" symbols to allow whitespace-containing arguments.
-    let args_iter = args.split(' ').into_iter();
+    let normalized_args = args.trim();
+
+    // If command line arguments are empty, no not add them into the iterator.
+    let args: Vec<OsString> = if normalized_args.is_empty() {
+        crate::iter::once(app_path).map(|x| OsString::from(x)).collect()
+    } else {
+        crate::iter::once(app_path).chain(normalized_args.split(' ').into_iter()).map(|x| OsString::from(x)).collect()
+    };
 
     Args {
-        it: crate::iter::once(app_path).chain(args_iter).into_iter()
+        args: args.into_iter()
     }
 }
 
@@ -33,7 +37,7 @@ impl Iterator for Args {
 
     #[inline]
     fn next(&mut self) -> Option<OsString> {
-        self.it.next().map(|x| x.into())
+        self.args.next().map(|x| x.into())
     }
 
     // #[inline]
