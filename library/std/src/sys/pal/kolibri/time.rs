@@ -1,11 +1,14 @@
 #[derive(Debug, Copy, Clone)]
 pub struct Date {
-    pub day: u8,
-    pub month: u8,
-    pub year: u16
+    pub day: u8,   // 1..=12
+    pub month: u8, // 1..=12
+    pub year: u16  // 1..=u16::MAX
 }
 
 impl Date {
+    /// Calculates total days passed from 1/1/1
+    /// 
+    /// NOTE: I still wonder how...
     pub fn total_days(&self) -> usize {
         let mut this = self.clone();
 
@@ -32,6 +35,7 @@ pub struct Time {
 }
 
 impl Time {
+    /// Calculates total seconds passed from 00:00:00
     pub fn total_seconds(&self) -> usize {
         let hs = (self.hour as usize) * 3600;
         let ms = (self.minute as usize) * 60;
@@ -47,7 +51,7 @@ pub struct DateTime {
 }
 
 impl DateTime {
-    // XXX(NDRAEY): I may be wrong with that!
+    /// Calculates seconds passed from UNIX Epoch (1/1/1970)
     pub fn to_unix(&self) -> u64 {
         fn to_seconds(dt: &DateTime) -> u64 {
             let days = dt.date.total_days() as u64;

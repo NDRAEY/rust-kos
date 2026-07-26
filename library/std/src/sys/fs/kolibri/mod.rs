@@ -16,7 +16,7 @@ pub struct File {
     options: OpenOptions,
 }
 
-pub struct FileAttr(crate::sys::pal::fs::DirectoryEntryInfo);
+pub struct FileAttr(crate::sys::pal::fs::NamelessDirectoryEntryInfo);
 
 pub struct ReadDir(!);
 
@@ -236,6 +236,29 @@ impl OpenOptions {
 
 impl File {
     pub fn open(path: &Path, opts: &OpenOptions) -> io::Result<File> {
+        // If file doesn't exist and user doesn't want it be created, bail out.
+        if !exists(path)? && !opts.create {
+            return Err(io::ErrorKind::NotFound.into());
+        }
+
+        // If file doesn't exist and its stated to be created, do it.
+        if !exists(path)? && opts.create {
+            let blk = crate::sys::pal::fs::FSDataBlockBuilder::new()
+                .stat()
+                .path_from_path(path)
+                .offset(0)
+                .buffer(&[])
+                .build()
+                .unwrap();
+
+            let (status, _) = crate::sys::pal::fs::fs_request(blk);
+
+            match status {
+                0 => (),
+                1.. => return Err(io::Error::from_raw_os_error(status as _))
+            };
+        }
+        
         Ok(File {
             // TODO: Handle `.unwrap()`
             path: crate::ffi::CString::new(path.to_str().unwrap()).unwrap(),
@@ -245,7 +268,7 @@ impl File {
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        let mut info: crate::sys::pal::fs::DirectoryEntryInfo = unsafe { core::mem::zeroed() };
+        let mut info: crate::sys::pal::fs::NamelessDirectoryEntryInfo = unsafe { core::mem::zeroed() };
 
         let info_ptr: *mut u8 = core::ptr::addr_of_mut!(info).cast();
 
@@ -526,10 +549,28 @@ pub fn remove_dir_all(_path: &Path) -> io::Result<()> {
     unsupported()
 }
 
-pub fn exists(_path: &Path) -> io::Result<bool> {
-    writeln!(crate::sys::pal::api::debugboard(), "unimplemented: ::exists").unwrap();
+pub fn exists(path: &Path) -> io::Result<bool> {
+    let mut info: crate::sys::pal::fs::NamelessDirectoryEntryInfo = unsafe { core::mem::zeroed() };
 
-    unsupported()
+    let info_ptr: *mut u8 = core::ptr::addr_of_mut!(info).cast();
+
+    let info_buf = unsafe { core::slice::from_raw_parts_mut(info_ptr, core::mem::size_of_val(&info)) };
+
+    let blk = crate::sys::pal::fs::FSDataBlockBuilder::new()
+        .stat()
+        .path_from_path(path)
+        .offset(0)
+        .buffer_mut(info_buf)
+        .build()
+        .unwrap();
+
+    let (status, _) = crate::sys::pal::fs::fs_request(blk);
+
+    match status {
+        5 => Ok(false),
+        0 => Ok(true),
+        _ => Err(io::Error::from_raw_os_error(status as _))
+    }
 }
 
 pub fn readlink(_p: &Path) -> io::Result<PathBuf> {

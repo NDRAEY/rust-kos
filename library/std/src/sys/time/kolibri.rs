@@ -8,6 +8,7 @@ pub struct SystemTime(Duration);
 
 pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::from_secs(0));
 
+// Is that a performance clock?
 impl Instant {
     pub fn now() -> Instant {
         panic!("time not implemented on this platform")
@@ -32,7 +33,18 @@ impl SystemTime {
     pub const MIN: SystemTime = SystemTime(Duration::ZERO);
 
     pub fn now() -> SystemTime {
-        panic!("time not implemented on this platform")
+        let date = crate::sys::pal::api::date();
+        let time = crate::sys::pal::api::time();
+
+        let dt = crate::sys::pal::time::DateTime {
+            date, time
+        };
+
+        let unix = dt.to_unix();
+
+        SystemTime(Duration::from_secs(unix))
+
+        // panic!("time not implemented on this platform")
     }   
 
     pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {

@@ -130,6 +130,13 @@ impl<'buf> FSDataBlockBuilder<'buf> {
         self
     }
 
+    pub fn path_from_path(mut self, path: &crate::path::Path) -> Self {
+        // TODO: Error handling?
+        self.filepath = Some(CString::new(path.to_str().unwrap()).unwrap());
+
+        self
+    }
+
     pub fn offset(mut self, offset: u64) -> Self {
         self.offset = Some(FSOffset { offset: offset.to_be() });
 
@@ -221,7 +228,7 @@ impl DirectoryEntryInfoDate {
 }
 
 #[repr(C, packed(1))]
-pub struct DirectoryEntryInfo {
+pub struct NamelessDirectoryEntryInfo {
     // TODO: Use `bitflags` crate here?
     attributes: u32,
     encoding: u8,
@@ -238,28 +245,9 @@ pub struct DirectoryEntryInfo {
     modify_date: DirectoryEntryInfoDate,
 
     filesize: u64,
-
-    // Here comes the nul-terminated name.
-    // As said in `https://wiki.kolibrios.org/wiki/SysFn70/ru#%D0%9F%D0%BE%D0%B4%D1%84%D1%83%D0%BD%D0%BA%D1%86%D0%B8%D1%8F_5_-_%D0%BF%D0%BE%D0%BB%D1%83%D1%87%D0%B5%D0%BD%D0%B8%D0%B5_%D0%B8%D0%BD%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%86%D0%B8%D0%B8_%D0%BE_%D1%84%D0%B0%D0%B9%D0%BB%D0%B5/%D0%BF%D0%B0%D0%BF%D0%BA%D0%B5.`
-    // ... this structre is dynamically-sized (with CP866 name = 304 bytes, 560 bytes otherwise.)
-    // This is not cool, so set this field to max possible size.
-
-    name_raw: [core::ffi::c_char; 520],  // 560 - sizeof previous fields
 }
 
-impl Clone for DirectoryEntryInfo {
-    fn clone(&self) -> Self {
-        unsafe {
-            let mut empty: Self = core::mem::zeroed();
-
-            core::ptr::copy_nonoverlapping(self as *const Self, &mut empty as &mut Self, core::mem::size_of::<Self>());
-
-            empty
-        }
-    }
-}
-
-impl DirectoryEntryInfo {
+impl NamelessDirectoryEntryInfo {
     #[inline]
     pub fn is_readonly(&self) -> bool {
         (self.attributes & 1) != 0
@@ -306,14 +294,54 @@ impl DirectoryEntryInfo {
     }
 }
 
+#[repr(C, packed(1))]
+pub struct DirectoryEntryInfo {
+    info: NamelessDirectoryEntryInfo,
+
+    // Here comes the nul-terminated name.
+    // As said in `https://wiki.kolibrios.org/wiki/SysFn70/ru#%D0%9F%D0%BE%D0%B4%D1%84%D1%83%D0%BD%D0%BA%D1%86%D0%B8%D1%8F_5_-_%D0%BF%D0%BE%D0%BB%D1%83%D1%87%D0%B5%D0%BD%D0%B8%D0%B5_%D0%B8%D0%BD%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%86%D0%B8%D0%B8_%D0%BE_%D1%84%D0%B0%D0%B9%D0%BB%D0%B5/%D0%BF%D0%B0%D0%BF%D0%BA%D0%B5.`
+    // ... this structre is dynamically-sized (with CP866 name = 304 bytes, 560 bytes otherwise.)
+    // This is not cool, so set this field to max possible size.
+
+    name_raw: [core::ffi::c_char; 520],  // 560 - sizeof previous fields
+}
+
+impl Clone for NamelessDirectoryEntryInfo {
+    fn clone(&self) -> Self {
+        unsafe {
+            let mut empty: Self = core::mem::zeroed();
+
+            core::ptr::copy_nonoverlapping(self as *const Self, &mut empty as &mut Self, core::mem::size_of::<Self>());
+
+            empty
+        }
+    }
+}
+
+impl Clone for DirectoryEntryInfo {
+    fn clone(&self) -> Self {
+        unsafe {
+            let mut empty: Self = core::mem::zeroed();
+
+            core::ptr::copy_nonoverlapping(self as *const Self, &mut empty as &mut Self, core::mem::size_of::<Self>());
+
+            empty
+        }
+    }
+}
+
 impl DirectoryEntryInfo {
+    pub fn info(&self) -> &NamelessDirectoryEntryInfo {
+        &self.info
+    }
+
     pub fn structure_size(&self) -> usize {
         // 0 = default
         // 1 = cp866
         // 2 = UTF-16LE
         // 3 = UTF-8
 
-        if self.encoding == 1 {
+        if self.info.encoding == 1 {
             304
         } else {
             560
