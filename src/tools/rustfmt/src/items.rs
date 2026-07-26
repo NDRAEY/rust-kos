@@ -1885,8 +1885,8 @@ pub(crate) fn rewrite_struct_field_prefix(
     field: &ast::FieldDef,
 ) -> RewriteResult {
     let vis = format_visibility(context, &field.vis);
-    let mut_restriction = format_mut_restriction(context, &field.mut_restriction);
-    let safety = format_safety(field.safety);
+    let mut_restriction = format_mut_restriction(context, field.mut_restriction());
+    let safety = format_safety(field.safety());
     let type_annotation_spacing = type_annotation_spacing(context.config);
     Ok(match field.ident {
         Some(name) => format!(
@@ -1915,7 +1915,7 @@ pub(crate) fn rewrite_struct_field(
     lhs_max_width: usize,
 ) -> RewriteResult {
     // FIXME(default_field_values): Implement formatting.
-    if field.default.is_some() {
+    if field.default_value().is_some() {
         return Err(RewriteError::Unknown);
     }
 
@@ -2008,7 +2008,7 @@ impl<'a> StaticParts<'a> {
                 ),
                 ast::ItemKind::Const(c) => (
                     Some(c.defaultness),
-                    if c.rhs_kind.is_type_const() {
+                    if c.kind == ast::ConstItemKind::TypeConst {
                         "type const"
                     } else {
                         "const"
@@ -2017,7 +2017,7 @@ impl<'a> StaticParts<'a> {
                     c.ident,
                     &c.ty,
                     ast::Mutability::Not,
-                    c.rhs_kind.expr(),
+                    c.body.as_deref(),
                     Some(&c.generics),
                 ),
                 _ => unreachable!(),
@@ -2039,7 +2039,7 @@ impl<'a> StaticParts<'a> {
     pub(crate) fn from_trait_item(ti: &'a ast::AssocItem, ident: Ident) -> Self {
         let (defaultness, ty, expr_opt, generics, prefix) = match &ti.kind {
             ast::AssocItemKind::Const(c) => {
-                let prefix = if c.rhs_kind.is_type_const() {
+                let prefix = if c.kind == ast::ConstItemKind::TypeConst {
                     "type const"
                 } else {
                     "const"
@@ -2047,7 +2047,7 @@ impl<'a> StaticParts<'a> {
                 (
                     c.defaultness,
                     &c.ty,
-                    c.rhs_kind.expr(),
+                    c.body.as_deref(),
                     Some(&c.generics),
                     prefix,
                 )
@@ -2071,7 +2071,7 @@ impl<'a> StaticParts<'a> {
     pub(crate) fn from_impl_item(ii: &'a ast::AssocItem, ident: Ident) -> Self {
         let (defaultness, ty, expr_opt, generics, prefix) = match &ii.kind {
             ast::AssocItemKind::Const(c) => {
-                let prefix = if c.rhs_kind.is_type_const() {
+                let prefix = if c.kind == ast::ConstItemKind::TypeConst {
                     "type const"
                 } else {
                     "const"
@@ -2079,7 +2079,7 @@ impl<'a> StaticParts<'a> {
                 (
                     c.defaultness,
                     &c.ty,
-                    c.rhs_kind.expr(),
+                    c.body.as_deref(),
                     Some(&c.generics),
                     prefix,
                 )
