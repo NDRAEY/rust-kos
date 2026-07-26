@@ -12,19 +12,19 @@ pub enum FSSubFunction {
     SetAttributes = 6,
     LaunchProgram = 7,
     DeleteFileDir = 8,
-    CreateDirectory = 9
+    CreateDirectory = 9,
 }
 
 #[repr(C)]
 pub struct FSOffsetWithFlags {
     offset: u32,
-    flags: u32
+    flags: u32,
 }
 
 #[repr(C)]
 pub union FSOffset {
     offset: u64,
-    offset_with_flags: core::mem::ManuallyDrop<FSOffsetWithFlags>
+    offset_with_flags: core::mem::ManuallyDrop<FSOffsetWithFlags>,
 }
 
 #[repr(C, packed(1))]
@@ -36,7 +36,7 @@ pub struct FSDataBlock<'buf> {
     buffer_size: u32,
     buffer_addr: u32,
     zero: u8,
-    filepath: *const core::ffi::c_char
+    filepath: *const core::ffi::c_char,
 }
 
 const _: &[()] = &[
@@ -80,7 +80,8 @@ pub struct FSDataBlockBuilder<'buf> {
     subfunction: Option<FSSubFunction>,
     offset: Option<FSOffset>,
     buffer: Option<FSDataBlockBuilderBuffer<'buf>>,
-    filepath: Option<CString>
+    filepath: Option<CString>,
+    size_override: Option<u32>,
 }
 
 impl<'buf> FSDataBlockBuilder<'buf> {
@@ -90,6 +91,12 @@ impl<'buf> FSDataBlockBuilder<'buf> {
 
     pub fn read(mut self) -> Self {
         self.subfunction = Some(FSSubFunction::ReadFile);
+
+        self
+    }
+
+    pub fn read_dir(mut self) -> Self {
+        self.subfunction = Some(FSSubFunction::ReadDir);
 
         self
     }
@@ -145,24 +152,27 @@ impl<'buf> FSDataBlockBuilder<'buf> {
 
     pub fn offset_flags(mut self, offset: u32, flags: u32) -> Self {
         self.offset = Some(FSOffset {
-            offset_with_flags: core::mem::ManuallyDrop::new(FSOffsetWithFlags {
-                offset,
-                flags
-            })
+            offset_with_flags: core::mem::ManuallyDrop::new(FSOffsetWithFlags { offset, flags }),
         });
+
+        self
+    }
+
+    pub fn override_size(mut self, size: u32) -> Self {
+        self.size_override = Some(size);
 
         self
     }
 
     pub fn buffer(mut self, buf: &'buf [u8]) -> Self {
         self.buffer = Some(FSDataBlockBuilderBuffer::Immutable(buf));
-        
+
         self
     }
 
     pub fn buffer_mut(mut self, buf: &'buf mut [u8]) -> Self {
         self.buffer = Some(FSDataBlockBuilderBuffer::Mutable(buf));
-        
+
         self
     }
 
@@ -173,23 +183,32 @@ impl<'buf> FSDataBlockBuilder<'buf> {
         // Mark this as UTF-8 path.
         new_path.insert_str(0, "\x03");
 
-        let buffer_length = if self.subfunction? == FSSubFunction::Stat {
-            0
-        } else {
-            self.buffer.as_ref()?.len()
-        };
-        
+        let subfn = self.subfunction?;
+        let buffer = self.buffer?;
+
+        let buffer_length = self.size_override.unwrap_or_else(|| {
+            if subfn == FSSubFunction::Stat { 0 } else { buffer.len() as u32 }
+        });
+
         Some(FSDataBlock {
-            subfunction: self.subfunction?,
+            subfunction: subfn,
             offset: self.offset?,
 
             phantom_buffer: core::marker::PhantomData,
             buffer_size: buffer_length as _,
-            buffer_addr: self.buffer?.as_ptr().addr() as _,
+            buffer_addr: buffer.as_ptr().addr() as _,
             zero: 0,
-            filepath: CString::new(new_path).unwrap().into_raw()
+            filepath: CString::new(new_path).unwrap().into_raw(),
         })
     }
+}
+
+#[repr(C, packed(1))]
+pub struct DirectoryEntryHeader {
+    pub version: u32,
+    pub block_count: u32,
+    pub total_entry_count: u32,
+    _reserved: [u8; 20],
 }
 
 #[repr(C, packed(1))]
@@ -202,11 +221,7 @@ pub struct DirectoryEntryInfoTime {
 
 impl DirectoryEntryInfoTime {
     pub fn to_system_time(&self) -> super::time::Time {
-        super::time::Time {
-            second: self.seconds,
-            minute: self.minutes,
-            hour: self.hours,
-        }
+        super::time::Time { second: self.seconds, minute: self.minutes, hour: self.hours }
     }
 }
 
@@ -214,16 +229,12 @@ impl DirectoryEntryInfoTime {
 pub struct DirectoryEntryInfoDate {
     pub day: u8,
     pub month: u8,
-    pub year: u16
+    pub year: u16,
 }
 
 impl DirectoryEntryInfoDate {
     pub fn to_system_date(&self) -> super::time::Date {
-        super::time::Date {
-            day: self.day,
-            month: self.month,
-            year: self.year,
-        }
+        super::time::Date { day: self.day, month: self.month, year: self.year }
     }
 }
 
@@ -232,7 +243,7 @@ pub struct NamelessDirectoryEntryInfo {
     // TODO: Use `bitflags` crate here?
     attributes: u32,
     encoding: u8,
-    
+
     _rsv: [u8; 3],
 
     creation_time: DirectoryEntryInfoTime,
@@ -280,17 +291,26 @@ impl NamelessDirectoryEntryInfo {
 
     #[inline]
     pub fn created(&self) -> super::time::DateTime {
-        super::time::DateTime { date: self.creation_date.to_system_date(), time: self.creation_time.to_system_time() }
+        super::time::DateTime {
+            date: self.creation_date.to_system_date(),
+            time: self.creation_time.to_system_time(),
+        }
     }
-    
+
     #[inline]
     pub fn accessed(&self) -> super::time::DateTime {
-        super::time::DateTime { date: self.access_date.to_system_date(), time: self.access_time.to_system_time() }
+        super::time::DateTime {
+            date: self.access_date.to_system_date(),
+            time: self.access_time.to_system_time(),
+        }
     }
 
     #[inline]
     pub fn modified(&self) -> super::time::DateTime {
-        super::time::DateTime { date: self.modify_date.to_system_date(), time: self.modify_time.to_system_time() }
+        super::time::DateTime {
+            date: self.modify_date.to_system_date(),
+            time: self.modify_time.to_system_time(),
+        }
     }
 }
 
@@ -302,8 +322,7 @@ pub struct DirectoryEntryInfo {
     // As said in `https://wiki.kolibrios.org/wiki/SysFn70/ru#%D0%9F%D0%BE%D0%B4%D1%84%D1%83%D0%BD%D0%BA%D1%86%D0%B8%D1%8F_5_-_%D0%BF%D0%BE%D0%BB%D1%83%D1%87%D0%B5%D0%BD%D0%B8%D0%B5_%D0%B8%D0%BD%D1%84%D0%BE%D1%80%D0%BC%D0%B0%D1%86%D0%B8%D0%B8_%D0%BE_%D1%84%D0%B0%D0%B9%D0%BB%D0%B5/%D0%BF%D0%B0%D0%BF%D0%BA%D0%B5.`
     // ... this structre is dynamically-sized (with CP866 name = 304 bytes, 560 bytes otherwise.)
     // This is not cool, so set this field to max possible size.
-
-    name_raw: [core::ffi::c_char; 520],  // 560 - sizeof previous fields
+    pub(crate) name_raw: [core::ffi::c_char; 520], // 560 - sizeof previous fields
 }
 
 impl Clone for NamelessDirectoryEntryInfo {
@@ -311,7 +330,11 @@ impl Clone for NamelessDirectoryEntryInfo {
         unsafe {
             let mut empty: Self = core::mem::zeroed();
 
-            core::ptr::copy_nonoverlapping(self as *const Self, &mut empty as &mut Self, core::mem::size_of::<Self>());
+            core::ptr::copy_nonoverlapping(
+                self as *const Self,
+                &mut empty as &mut Self,
+                core::mem::size_of::<Self>(),
+            );
 
             empty
         }
@@ -323,7 +346,11 @@ impl Clone for DirectoryEntryInfo {
         unsafe {
             let mut empty: Self = core::mem::zeroed();
 
-            core::ptr::copy_nonoverlapping(self as *const Self, &mut empty as &mut Self, core::mem::size_of::<Self>());
+            core::ptr::copy_nonoverlapping(
+                self as *const Self,
+                &mut empty as &mut Self,
+                core::mem::size_of::<Self>(),
+            );
 
             empty
         }
@@ -341,16 +368,16 @@ impl DirectoryEntryInfo {
         // 2 = UTF-16LE
         // 3 = UTF-8
 
-        if self.info.encoding == 1 {
-            304
-        } else {
-            560
-        }
+        if self.info.encoding == 1 { 304 } else { 560 }
     }
 }
 
+#[repr(C)]
+pub struct SingleEntryDirectoryBlock {
+    pub header: crate::sys::pal::fs::DirectoryEntryHeader,
+    pub entry: crate::sys::pal::fs::DirectoryEntryInfo,
+}
+
 pub fn fs_request(block: FSDataBlock<'_>) -> (usize, usize) {
-    unsafe {
-        super::syscall::syscall2_all(70, (&block as *const FSDataBlock<'_>).addr())
-    }
+    unsafe { super::syscall::syscall2_all(70, (&block as *const FSDataBlock<'_>).addr()) }
 }

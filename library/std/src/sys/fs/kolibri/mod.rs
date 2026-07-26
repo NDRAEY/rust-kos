@@ -8,19 +8,28 @@ pub use crate::sys::fs::common::Dir;
 use crate::sys::time::SystemTime;
 use crate::sys::unsupported;
 
+use core::cell::Cell;
+use crate::sys::pal::fs::{SingleEntryDirectoryBlock, NamelessDirectoryEntryInfo};
+
 use core::fmt::Write;
 
 pub struct File {
     path: CString,
-    position: core::cell::Cell<u64>,
+    position: Cell<u64>,
     options: OpenOptions,
 }
 
-pub struct FileAttr(crate::sys::pal::fs::NamelessDirectoryEntryInfo);
+pub struct FileAttr(NamelessDirectoryEntryInfo);
 
-pub struct ReadDir(!);
+pub struct ReadDir {
+    path: CString,
+    position: Cell<u32>,
+}
 
-pub struct DirEntry(!);
+pub struct DirEntry {
+    path: CString,
+    entry: SingleEntryDirectoryBlock
+}
 
 #[derive(Clone, Debug)]
 pub struct OpenOptions {
@@ -180,8 +189,8 @@ impl fmt::Debug for FileType {
 }
 
 impl fmt::Debug for ReadDir {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ReadDir")
     }
 }
 
@@ -189,25 +198,74 @@ impl Iterator for ReadDir {
     type Item = io::Result<DirEntry>;
 
     fn next(&mut self) -> Option<io::Result<DirEntry>> {
-        self.0
+        writeln!(crate::sys::pal::api::debugboard(), "ReadDir::next: called").unwrap();
+        
+        let mut entry: SingleEntryDirectoryBlock = unsafe { core::mem::zeroed() };
+
+        let entry_ptr = (&mut entry as *mut SingleEntryDirectoryBlock).cast::<u8>();
+
+        let entry_buf = unsafe { core::slice::from_raw_parts_mut(entry_ptr, core::mem::size_of_val(&entry)) };
+
+        let blk = crate::sys::pal::fs::FSDataBlockBuilder::new()
+                .read_dir()
+                .path(self.path.clone())  // TODO: Optimize that (use reference instead of cloning it each time)
+                .offset_flags(self.position.get(), 3)
+                .buffer_mut(entry_buf)
+                .override_size(1)
+                .build()
+                .unwrap();
+
+        writeln!(crate::sys::pal::api::debugboard(), "ReadDir::next: request").unwrap();
+
+        let (status, read_entries_count) = crate::sys::pal::fs::fs_request(blk);
+
+        writeln!(crate::sys::pal::api::debugboard(), "ReadDir::next: status={status}, read_entries={read_entries_count}").unwrap();
+
+        match status {
+            0 => {
+                self.position.set(self.position.get() + 1);
+
+                Some(Ok(DirEntry { path: self.path.clone(), entry }))
+            }
+            6 => None,
+            _ => Some(Err(io::Error::from_raw_os_error(status as _)))
+        }
     }
 }
 
 impl DirEntry {
     pub fn path(&self) -> PathBuf {
-        self.0
+        let buf = &self.entry.entry.name_raw;
+        let ptr = buf.as_ptr();
+        
+        let cstr = unsafe { crate::ffi::CStr::from_ptr(ptr) };
+
+        let filename = cstr.to_str().unwrap();
+
+        let mut normalized_path = String::from(self.path.to_string_lossy());
+
+        normalized_path.push_str(filename);
+
+        PathBuf::from(normalized_path)
     }
 
     pub fn file_name(&self) -> OsString {
-        self.0
+        let buf = &self.entry.entry.name_raw;
+        let ptr = buf.as_ptr();
+        
+        // SAFETY: This conversion from `*const` to `*mut` is temporary, because `cstring` lives within this block.
+        // So this should sound (I'm not sure).
+        let cstring = unsafe { crate::ffi::CString::from_raw(ptr as *mut _) };
+
+        cstring.to_str().unwrap().into()
     }
 
     pub fn metadata(&self) -> io::Result<FileAttr> {
-        self.0
+        Ok(FileAttr(self.entry.entry.info().clone()))
     }
 
     pub fn file_type(&self) -> io::Result<FileType> {
-        self.0
+        Ok(FileType { is_folder: self.entry.entry.info().is_folder() })
     }
 }
 
@@ -262,13 +320,13 @@ impl File {
         Ok(File {
             // TODO: Handle `.unwrap()`
             path: crate::ffi::CString::new(path.to_str().unwrap()).unwrap(),
-            position: core::cell::Cell::new(0),
+            position: Cell::new(0),
             options: opts.clone()
         })
     }
 
     pub fn file_attr(&self) -> io::Result<FileAttr> {
-        let mut info: crate::sys::pal::fs::NamelessDirectoryEntryInfo = unsafe { core::mem::zeroed() };
+        let mut info: NamelessDirectoryEntryInfo = unsafe { core::mem::zeroed() };
 
         let info_ptr: *mut u8 = core::ptr::addr_of_mut!(info).cast();
 
@@ -500,10 +558,17 @@ impl fmt::Debug for File {
     }
 }
 
-pub fn readdir(_p: &Path) -> io::Result<ReadDir> {
-    writeln!(crate::sys::pal::api::debugboard(), "unimplemented: ::readdir").unwrap();
+pub fn readdir(p: &Path) -> io::Result<ReadDir> {
+    if !exists(p)? {
+        return Err(io::ErrorKind::NotFound.into());
+    }
 
-    unsupported()
+    let readdir = ReadDir {
+        path: CString::new(p.to_str().unwrap()).unwrap(),
+        position: Cell::new(0)
+    };
+
+    Ok(readdir)
 }
 
 pub fn unlink(_p: &Path) -> io::Result<()> {
