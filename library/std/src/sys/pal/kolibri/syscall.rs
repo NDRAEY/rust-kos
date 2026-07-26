@@ -16,6 +16,20 @@ pub unsafe fn syscall2(nr: usize, p1: usize) -> usize {
     result
 }
 
+// Used in syscalls that return multiple values.
+#[inline]
+pub unsafe fn syscall2_all(nr: usize, p1: usize) -> (usize, usize) {
+    let mut eax = 0;
+    let mut ebx = 0;
+    
+    unsafe {
+        crate::arch::asm!("int 0x40", in("eax") nr, in("ebx") p1, lateout("eax") eax, lateout("ebx") ebx)
+    };
+
+    (eax, ebx)
+}
+
+
 #[inline]
 pub unsafe fn syscall3(nr: usize, p1: usize, p2: usize) -> usize {
     let mut result = 0;

@@ -4,7 +4,7 @@ use super::syscall::*;
 pub fn exit(_code: u32) -> ! {
     unsafe { syscall1(0xffff_ffff) };
 
-    loop {}
+    unreachable!()
 }
 
 #[inline]
@@ -60,4 +60,36 @@ impl crate::fmt::Write for DebugBoard {
 
 pub fn debugboard() -> DebugBoard {
     DebugBoard
+}
+
+fn bcd2dec(bcd: u8) -> u8 {
+    bcd - 6 * (bcd >> 4)
+}
+
+pub fn time() -> super::time::Time {
+    let value = unsafe { syscall1(3) };
+
+    let bcd_h = value & 0xff;
+    let bcd_m = (value >> 8) & 0xff;
+    let bcd_s = (value >> 16) & 0xff;
+
+    super::time::Time {
+        hour: bcd2dec(bcd_h as u8),
+        minute: bcd2dec(bcd_m as u8),
+        second: bcd2dec(bcd_s as u8)
+    }
+}
+
+pub fn date() -> super::time::Date {
+    let value = unsafe { syscall1(29) };
+
+    let bcd_y = value & 0xff;
+    let bcd_m = (value >> 8) & 0xff;
+    let bcd_d = (value >> 16) & 0xff;
+
+    super::time::Date {
+        year: bcd2dec(bcd_y as u8) as u16 + 2000,
+        month: bcd2dec(bcd_m as u8),
+        day: bcd2dec(bcd_d as u8)
+    }
 }
