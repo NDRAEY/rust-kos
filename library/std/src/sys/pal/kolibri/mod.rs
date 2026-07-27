@@ -8,6 +8,7 @@ pub mod api;
 pub mod dll;
 pub mod error;
 pub mod fs;
+pub mod futex;
 pub mod net;
 pub mod sbrk;
 pub mod time;

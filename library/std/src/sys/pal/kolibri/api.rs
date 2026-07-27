@@ -108,3 +108,7 @@ pub fn sleep_this_thread(nanos: u128) {
     // TODO: Wait when KOS devs fix that, making sleep resolution at least 1 ms (would be perfectly if 1 ns).
     unsafe { syscall2(5, (millis / 10) as _) };
 }
+
+pub fn spawn_thread(entry_point: *const (), stack_top: *mut usize) -> usize {
+    unsafe { syscall4(51, 1, entry_point.addr(), stack_top.addr()) }
+}
