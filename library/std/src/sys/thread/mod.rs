@@ -6,6 +6,10 @@ cfg_select! {
         mod unsupported;
         pub use unsupported::{current_os_id, set_name};
     }
+    target_os = "kolibri" => {
+        mod kolibri;
+        pub use kolibri::*;
+    }
     target_os = "motor" => {
         mod motor;
         pub use motor::*;

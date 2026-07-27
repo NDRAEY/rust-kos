@@ -93,3 +93,18 @@ pub fn date() -> super::time::Date {
         day: bcd2dec(bcd_d as u8)
     }
 }
+
+pub fn yield_now() {
+    unsafe { syscall2(68, 1) };
+}
+
+pub fn sleep_this_thread(nanos: u128) {
+    let millis = nanos / 1_000_000;
+
+    // https://wiki.kolibrios.org/wiki/SysFn05/ru
+    // ebx = time in hundredths of a second.
+    //
+    // It means that sleep resolution is 10 ms.
+    // TODO: Wait when KOS devs fix that, making sleep resolution at least 1 ms (would be perfectly if 1 ns).
+    unsafe { syscall2(5, (millis / 10) as _) };
+}
