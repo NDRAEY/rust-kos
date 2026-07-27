@@ -11,7 +11,19 @@ pub const UNIX_EPOCH: SystemTime = SystemTime(Duration::from_secs(0));
 // Is that a performance clock?
 impl Instant {
     pub fn now() -> Instant {
-        panic!("time not implemented on this platform")
+        // TODO: This implementation of Instant is just a stub.
+        // When I found how to convert KolibriOS' performance clock, I edit this func.
+        
+        let date = crate::sys::pal::api::date();
+        let time = crate::sys::pal::api::time();
+
+        let dt = crate::sys::pal::time::DateTime {
+            date, time
+        };
+
+        let unix = dt.to_unix();
+
+        Instant(Duration::from_secs(unix))
     }
 
     pub fn checked_sub_instant(&self, other: &Instant) -> Option<Duration> {
@@ -43,8 +55,6 @@ impl SystemTime {
         let unix = dt.to_unix();
 
         SystemTime(Duration::from_secs(unix))
-
-        // panic!("time not implemented on this platform")
     }   
 
     pub fn sub_time(&self, other: &SystemTime) -> Result<Duration, Duration> {

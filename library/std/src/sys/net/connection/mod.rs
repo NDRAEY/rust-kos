@@ -17,6 +17,10 @@ cfg_select! {
         mod wasip1;
         pub use wasip1::*;
     }
+    target_os = "kolibri" => {
+        mod kolibri;
+        pub use kolibri::*;
+    }
     target_os = "motor" => {
         mod motor;
         pub use motor::*;

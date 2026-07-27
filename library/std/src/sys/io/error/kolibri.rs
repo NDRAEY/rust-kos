@@ -41,6 +41,16 @@ pub fn decode_error_kind(code: io::RawOsError) -> io::ErrorKind {
         // 32 = Too many processes
         32 => io::ErrorKind::Other,
 
+        // Errors shifted by 128 are network errors.
+
+        130 => io::ErrorKind::InProgress,
+        134 => io::ErrorKind::WouldBlock,
+        148 => io::ErrorKind::AddrInUse,
+        180 => io::ErrorKind::ConnectionReset,
+        181 => io::ErrorKind::ConnectionAborted,
+        188 => io::ErrorKind::TimedOut,
+        189 => io::ErrorKind::ConnectionRefused,
+
         _ => todo!("Unexpected error code: {code:?}")
     }
 }
