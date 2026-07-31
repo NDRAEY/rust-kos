@@ -15,7 +15,11 @@ extern "C" fn __rust_kos_thread_start(raw_threadinit: *mut ThreadInit) {
     unsafe { 
         let init = Box::from_raw(raw_threadinit);
 
-        let rust_start = init.init();
+        // Uncomment that when I get those thread_local! to work
+        // let rust_start = init.init();
+
+        // Sly kludge hehehehehe
+        let rust_start = init.rust_start;
 
         rust_start();
     }
@@ -54,6 +58,7 @@ impl Thread {
 
         // Skip these 4 bytes, they are reserved.
         stack_top = stack_top.byte_sub(core::mem::size_of::<usize>());
+        stack_top.write(init.addr());
         // Write address of entry point info to the new thread stack.
         stack_top = stack_top.byte_sub(core::mem::size_of::<usize>());
         stack_top.write(init.addr());

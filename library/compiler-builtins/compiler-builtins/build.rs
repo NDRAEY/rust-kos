@@ -494,8 +494,8 @@ mod c {
             sources.remove(&["__aeabi_cdcmp", "__aeabi_cfcmp"]);
         }
 
-        // Android and Cygwin uses emulated TLS so we need a runtime support function.
-        if cfg.target_os == "android" || cfg.target_os == "cygwin" {
+        // Android, Cygwin and KolibriOS uses emulated TLS so we need a runtime support function.
+        if cfg.target_os == "android" || cfg.target_os == "cygwin" || cfg.target_os == "kolibri" {
             sources.extend(&[("__emutls_get_address", "emutls.c")]);
         }
 

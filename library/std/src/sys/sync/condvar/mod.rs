@@ -1,6 +1,7 @@
 cfg_select! {
     any(
         all(target_os = "windows", not(target_vendor="win7")),
+        target_os = "kolibri",
         target_os = "linux",
         target_os = "android",
         target_os = "freebsd",

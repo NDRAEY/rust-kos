@@ -27,8 +27,8 @@ cfg_select! {
     any(
         all(target_family = "wasm", not(target_feature = "atomics")),
         target_os = "uefi",
-        target_os = "kolibri",
         target_os = "zkvm",
+        target_os = "kolibri",
         target_os = "trusty",
         target_os = "vexos",
     ) => {
@@ -75,6 +75,7 @@ pub(crate) mod destructors {
         _ => {
             mod list;
             pub(super) use list::register;
+            #[cfg_attr(target_os = "kolibri", expect(unused))]
             pub(crate) use list::run;
         }
     }
@@ -164,6 +165,15 @@ pub(crate) mod key {
             pub(super) use unix::get;
             use unix::{create, destroy};
         }
+        /* target_os = "kolibri" => {
+            mod racy;
+            pub(super) use racy::LazyKey;
+
+            pub(super) type Key = usize;
+
+            mod kolibri;
+            pub(super) use kolibri::*;
+        } */
         all(not(target_thread_local), target_os = "windows") => {
             #[cfg(test)]
             mod tests;
