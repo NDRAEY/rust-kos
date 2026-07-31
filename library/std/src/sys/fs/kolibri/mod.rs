@@ -602,6 +602,12 @@ pub fn set_times_nofollow(_p: &Path, _times: FileTimes) -> io::Result<()> {
     unsupported()
 }
 
+pub fn set_perm_nofollow(_p: &Path, _perm: FilePermissions) -> io::Result<()> {
+    writeln!(crate::sys::pal::api::debugboard(), "unimplemented: ::set_perm_nofollow").unwrap();
+
+    unsupported()
+}
+
 pub fn rmdir(_p: &Path) -> io::Result<()> {
     writeln!(crate::sys::pal::api::debugboard(), "unimplemented: ::rmdir").unwrap();
 
