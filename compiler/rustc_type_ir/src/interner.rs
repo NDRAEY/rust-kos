@@ -320,22 +320,22 @@ pub trait Interner:
         def_id: Self::DefId,
     ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = Self::Clause>>;
 
-    fn predicates_of(
+    fn clauses_of(
         self,
         def_id: Self::DefId,
     ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = Self::Clause>>;
 
-    fn own_predicates_of(
+    fn own_clauses_of(
         self,
         def_id: Self::DefId,
     ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = Self::Clause>>;
 
-    fn explicit_super_predicates_of(
+    fn explicit_super_clauses_of(
         self,
         def_id: Self::TraitId,
     ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = (Self::Clause, Self::Span)>>;
 
-    fn explicit_implied_predicates_of(
+    fn explicit_implied_clauses_of(
         self,
         def_id: Self::DefId,
     ) -> ty::EarlyBinder<Self, impl IntoIterator<Item = (Self::Clause, Self::Span)>>;
@@ -467,7 +467,10 @@ pub trait Interner:
     fn evaluate_root_goal_for_proof_tree_raw(
         self,
         canonical_goal: CanonicalInput<Self>,
+        root_depth: usize,
     ) -> (QueryResult<Self>, Self::Probe);
+
+    fn emit_next_solver_overflow_fcw(self, predicate: Self::Predicate, span: Self::Span);
 
     fn item_name(self, item_index: Self::DefId) -> Self::Symbol;
 
@@ -680,7 +683,7 @@ impl<T, R, E> CollectAndApply<T, R> for Result<T, E> {
 impl<I: Interner> search_graph::Cx for I {
     type Input = CanonicalInput<I>;
     type Result = (QueryResult<I>, AccessedOpaques<I>);
-    type AmbiguityInfo = Certainty;
+    type AmbiguityKind = Certainty;
 
     type DepNodeIndex = I::DepNodeIndex;
     type Tracked<T: Debug + Clone> = I::Tracked<T>;

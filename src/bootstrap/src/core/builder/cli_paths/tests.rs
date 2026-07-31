@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::Build;
-use crate::core::builder::{Builder, StepDescription};
+use crate::core::builder::{Builder, CommandLineStepDescription};
 use crate::utils::tests::TestCtx;
 
 fn render_steps_for_cli_args(args_str: &str) -> String {
@@ -38,7 +38,7 @@ fn render_steps_for_cli_args(args_str: &str) -> String {
         use std::fmt::Write;
         let mut buf = buf2.lock().unwrap();
 
-        let StepDescription { name, kind, .. } = step_desc;
+        let CommandLineStepDescription { name, kind, .. } = step_desc;
         // Strip boilerplate to make step names easier to read.
         let name = name.strip_prefix("bootstrap::core::build_steps::").unwrap_or(name);
 
@@ -170,6 +170,7 @@ declare_tests!(
     (x_test_librustdoc_rustdoc_html, "test librustdoc rustdoc-html"),
     (x_test_rustdoc, "test rustdoc"),
     (x_test_rustdoc_html, "test rustdoc-html"),
+    (x_test_semver_check, "test std-semver-check"),
     (x_test_skip_coverage, "test --skip=coverage"),
     (x_test_skip_coverage_map, "test --skip=coverage-map"),
     (x_test_skip_coverage_run, "test --skip=coverage-run"),

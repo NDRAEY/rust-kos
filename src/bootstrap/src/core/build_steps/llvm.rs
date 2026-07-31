@@ -17,7 +17,7 @@ use std::{env, fs};
 use build_helper::git::PathFreshness;
 
 use crate::core::build_steps::llvm;
-use crate::core::builder::{Builder, RunConfig, ShouldRun, Step, StepMetadata};
+use crate::core::builder::{Builder, CommandLineStep, RunConfig, ShouldRun, StepMetadata};
 use crate::core::config::{Config, LlvmPgoGenerationMode, TargetSelection};
 use crate::utils::build_stamp::{BuildStamp, generate_smart_stamp_hash};
 use crate::utils::exec::command;
@@ -272,7 +272,7 @@ pub struct Llvm {
     pub target: TargetSelection,
 }
 
-impl Step for Llvm {
+impl CommandLineStep for Llvm {
     type Output = LlvmResult;
 
     const IS_HOST: bool = true;
@@ -962,7 +962,7 @@ pub struct OmpOffload {
     pub target: TargetSelection,
 }
 
-impl Step for OmpOffload {
+impl CommandLineStep for OmpOffload {
     type Output = BuiltOmpOffload;
     const IS_HOST: bool = true;
 
@@ -1142,7 +1142,7 @@ pub struct Enzyme {
     pub target: TargetSelection,
 }
 
-impl Step for Enzyme {
+impl CommandLineStep for Enzyme {
     type Output = BuiltEnzyme;
     const IS_HOST: bool = true;
 
@@ -1278,7 +1278,7 @@ pub struct Lld {
     pub target: TargetSelection,
 }
 
-impl Step for Lld {
+impl CommandLineStep for Lld {
     type Output = PathBuf;
     const IS_HOST: bool = true;
 
@@ -1402,7 +1402,7 @@ pub struct Sanitizers {
     pub target: TargetSelection,
 }
 
-impl Step for Sanitizers {
+impl CommandLineStep for Sanitizers {
     type Output = Vec<SanitizerRuntime>;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
@@ -1525,10 +1525,14 @@ fn supported_sanitizers(
     let darwin_libs = |os: &str, components: &[&str]| -> Vec<SanitizerRuntime> {
         components
             .iter()
-            .map(move |c| SanitizerRuntime {
-                cmake_target: format!("clang_rt.{c}_{os}_dynamic"),
-                path: out_dir.join(format!("build/lib/darwin/libclang_rt.{c}_{os}_dynamic.dylib")),
-                name: format!("librustc-{channel}_rt.{c}.dylib"),
+            .map(move |c| {
+                let cmake_c = if *c == "ubsan" { "ubsan_standalone" } else { *c };
+                SanitizerRuntime {
+                    cmake_target: format!("clang_rt.{cmake_c}_{os}_dynamic"),
+                    path: out_dir
+                        .join(format!("build/lib/darwin/libclang_rt.{cmake_c}_{os}_dynamic.dylib")),
+                    name: format!("librustc-{channel}_rt.{c}.dylib"),
+                }
             })
             .collect()
     };
@@ -1536,10 +1540,13 @@ fn supported_sanitizers(
     let common_libs = |os: &str, arch: &str, components: &[&str]| -> Vec<SanitizerRuntime> {
         components
             .iter()
-            .map(move |c| SanitizerRuntime {
-                cmake_target: format!("clang_rt.{c}-{arch}"),
-                path: out_dir.join(format!("build/lib/{os}/libclang_rt.{c}-{arch}.a")),
-                name: format!("librustc-{channel}_rt.{c}.a"),
+            .map(move |c| {
+                let cmake_c = if *c == "ubsan" { "ubsan_standalone" } else { *c };
+                SanitizerRuntime {
+                    cmake_target: format!("clang_rt.{cmake_c}-{arch}"),
+                    path: out_dir.join(format!("build/lib/{os}/libclang_rt.{cmake_c}-{arch}.a")),
+                    name: format!("librustc-{channel}_rt.{c}.a"),
+                }
             })
             .collect()
     };
@@ -1550,9 +1557,11 @@ fn supported_sanitizers(
         "aarch64-apple-ios-sim" => darwin_libs("iossim", &["asan", "tsan", "rtsan"]),
         "aarch64-apple-ios-macabi" => darwin_libs("osx", &["asan", "lsan", "tsan"]),
         "aarch64-unknown-fuchsia" => common_libs("fuchsia", "aarch64", &["asan"]),
-        "aarch64-unknown-linux-gnu" => {
-            common_libs("linux", "aarch64", &["asan", "lsan", "msan", "tsan", "hwasan", "rtsan"])
-        }
+        "aarch64-unknown-linux-gnu" => common_libs(
+            "linux",
+            "aarch64",
+            &["asan", "lsan", "msan", "tsan", "hwasan", "rtsan", "ubsan"],
+        ),
         "aarch64-unknown-linux-ohos" => {
             common_libs("linux", "aarch64", &["asan", "lsan", "msan", "tsan", "hwasan"])
         }
@@ -1572,7 +1581,7 @@ fn supported_sanitizers(
         "x86_64-unknown-linux-gnu" => common_libs(
             "linux",
             "x86_64",
-            &["asan", "dfsan", "lsan", "msan", "safestack", "tsan", "rtsan"],
+            &["asan", "dfsan", "lsan", "msan", "safestack", "tsan", "rtsan", "ubsan"],
         ),
         "x86_64-unknown-linux-gnuasan" => common_libs("linux", "x86_64", &["asan"]),
         "x86_64-unknown-linux-gnumsan" => common_libs("linux", "x86_64", &["msan"]),
@@ -1598,7 +1607,7 @@ pub struct CrtBeginEnd {
     pub target: TargetSelection,
 }
 
-impl Step for CrtBeginEnd {
+impl CommandLineStep for CrtBeginEnd {
     type Output = PathBuf;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
@@ -1676,7 +1685,7 @@ pub struct Libunwind {
     pub target: TargetSelection,
 }
 
-impl Step for Libunwind {
+impl CommandLineStep for Libunwind {
     type Output = PathBuf;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {

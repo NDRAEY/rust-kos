@@ -863,16 +863,6 @@ pub(crate) struct EnumDiscriminantOverflowed {
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "the `#[rustc_paren_sugar]` attribute is a temporary means of controlling which traits can use parenthetical notation"
-)]
-#[help("add `#![feature(unboxed_closures)]` to the crate attributes to use it")]
-pub(crate) struct ParenSugarAttribute {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag("use of SIMD type{$snip} in FFI is highly experimental and may result in invalid code")]
 #[help("add `#![feature(simd_ffi)]` to the crate attributes to enable")]
 pub(crate) struct SIMDFFIHighlyExperimental {
@@ -976,6 +966,12 @@ pub(crate) struct MissingOneOfTraitItem {
     pub span: Span,
     #[note("required because of this annotation")]
     pub note: Option<Span>,
+    #[subdiagnostic]
+    pub missing_trait_item_label: Vec<MissingTraitItemLabel>,
+    #[subdiagnostic]
+    pub missing_trait_item: Vec<MissingTraitItemSuggestion>,
+    #[subdiagnostic]
+    pub missing_trait_item_none: Vec<MissingTraitItemSuggestionNone>,
     pub missing_items_msg: String,
 }
 
