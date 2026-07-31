@@ -285,27 +285,21 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                             || self.tcx.is_diagnostic_item(sym::TryFrom, trait_def_id))
                             && (self.tcx.is_diagnostic_item(sym::From, leaf_trait_def_id)
                                 || self.tcx.is_diagnostic_item(sym::TryFrom, leaf_trait_def_id))
-                        {
-                            let trait_ref = leaf_trait_predicate.skip_binder().trait_ref;
-
-                            if let Some(found_ty) =
+                            && let Some(trait_ref) =
+                                leaf_trait_predicate.no_bound_vars().map(|pred| pred.trait_ref)
+                            && let Some(found_ty) =
                                 trait_ref.args.get(1).and_then(|arg| arg.as_type())
-                            {
-                                let ty = main_trait_predicate.skip_binder().self_ty();
+                            && let Some(ty) =
+                                main_trait_predicate.no_bound_vars().map(|pred| pred.self_ty())
+                            && let Some(cast_ty) =
+                                self.find_explicit_cast_type(obligation.param_env, found_ty, ty)
+                        {
+                            let found_ty_str = self.tcx.short_string(found_ty, &mut long_ty_file);
+                            let cast_ty_str = self.tcx.short_string(cast_ty, &mut long_ty_file);
 
-                                if let Some(cast_ty) =
-                                    self.find_explicit_cast_type(obligation.param_env, found_ty, ty)
-                                {
-                                    let found_ty_str =
-                                        self.tcx.short_string(found_ty, &mut long_ty_file);
-                                    let cast_ty_str =
-                                        self.tcx.short_string(cast_ty, &mut long_ty_file);
-
-                                    err.help(format!(
-                                        "consider casting the `{found_ty_str}` value to `{cast_ty_str}`",
-                                    ));
-                                }
-                            }
+                            err.help(format!(
+                                "consider casting the `{found_ty_str}` value to `{cast_ty_str}`",
+                            ));
                         }
 
                         *err.long_ty_path() = long_ty_file;
@@ -555,7 +549,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                         };
                         if is_fn_trait && is_target_feature_fn {
                             err.note(
-                                "`#[target_feature]` functions do not implement the `Fn` traits",
+                                "`#[target_feature(..)]` functions do not implement the `Fn` traits",
                             );
                             err.note(
                                 "try casting the function to a `fn` pointer or wrapping it in a closure",
@@ -949,12 +943,12 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                     }
                 } else if let Some(impl_did) = impl_did.as_local()
                     && let item = self.tcx.hir_expect_item(impl_did)
-                    && let hir::ItemKind::Impl(item) = item.kind
-                    && let Some(of_trait) = item.of_trait
+                    && let hir::ItemKind::Impl(impl_) = item.kind
+                    && impl_.of_trait.is_some()
                 {
                     // trait is const, impl is local and not const
                     diag.span_suggestion_verbose(
-                        of_trait.trait_ref.path.span.shrink_to_lo(),
+                        item.span.shrink_to_lo(),
                         format!("make the `impl` of trait `{trait_name}` `const`"),
                         "const ".to_string(),
                         Applicability::MaybeIncorrect,
@@ -2155,7 +2149,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
 
                     ocx.register_obligations(
                         self.tcx
-                            .predicates_of(single.impl_def_id)
+                            .clauses_of(single.impl_def_id)
                             .instantiate(self.tcx, impl_args)
                             .into_iter()
                             .map(|(clause, _)| {
@@ -2357,7 +2351,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                                     }
                                     ocx.register_obligations(
                                         self.tcx
-                                            .predicates_of(def_id)
+                                            .clauses_of(def_id)
                                             .instantiate(self.tcx, impl_args)
                                             .into_iter()
                                             .map(|(clause, span)| {
@@ -2373,7 +2367,7 @@ impl<'a, 'tcx> TypeErrCtxt<'a, 'tcx> {
                                 })
                             };
                             let failing_obligations =
-                                if !self.tcx.predicates_of(def_id).predicates.is_empty() {
+                                if !self.tcx.clauses_of(def_id).clauses.is_empty() {
                                     self.probe(|_| evaluate_obligations())
                                 } else {
                                     Vec::new()

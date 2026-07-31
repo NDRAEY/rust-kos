@@ -3,12 +3,13 @@
 use std::ops::ControlFlow;
 use std::{debug_assert_matches, fmt};
 
+use rustc_data_structures::Limit;
 use rustc_data_structures::intern::Interned;
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir as hir;
-use rustc_hir::def::{CtorKind, DefKind};
-use rustc_hir::def_id::{DefId, LocalDefId};
-use rustc_hir::lang_items::LangItem;
+use rustc_hir::def::{CtorKind, DefKind, Namespace};
+use rustc_hir::def_id::{DefId, LOCAL_CRATE, LocalDefId};
+use rustc_hir::{CRATE_HIR_ID, LangItem};
 use rustc_span::{DUMMY_SP, Span, Symbol};
 use rustc_type_ir::lang_items::{SolverAdtLangItem, SolverProjectionLangItem, SolverTraitLangItem};
 use rustc_type_ir::{
@@ -22,6 +23,7 @@ use crate::traits::cache::WithDepNode;
 use crate::traits::solve::{
     self, CanonicalInput, ExternalConstraints, ExternalConstraintsData, QueryResult, inspect,
 };
+use crate::ty::print::{FmtPrinter, Print};
 use crate::ty::{
     self, BoundRegion, Clause, Const, List, ParamTy, Pattern, PolyExistentialPredicate, Predicate,
     Region, RegionKind, Ty, TyCtxt,
@@ -386,42 +388,42 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
         self.item_non_self_bounds(def_id).map_bound(IntoIterator::into_iter)
     }
 
-    fn predicates_of(
+    fn clauses_of(
         self,
         def_id: DefId,
     ) -> ty::EarlyBinder<'tcx, impl IntoIterator<Item = ty::Clause<'tcx>>> {
         ty::EarlyBinder::bind_iter(
-            self.predicates_of(def_id)
+            self.clauses_of(def_id)
                 .instantiate_identity(self)
-                .predicates
+                .clauses
                 .into_iter()
                 .map(Unnormalized::skip_normalization),
         )
     }
 
-    fn own_predicates_of(
+    fn own_clauses_of(
         self,
         def_id: DefId,
     ) -> ty::EarlyBinder<'tcx, impl IntoIterator<Item = ty::Clause<'tcx>>> {
         ty::EarlyBinder::bind_iter(
-            self.predicates_of(def_id)
+            self.clauses_of(def_id)
                 .instantiate_own_identity()
                 .map(|(clause, _)| clause.skip_normalization()),
         )
     }
 
-    fn explicit_super_predicates_of(
+    fn explicit_super_clauses_of(
         self,
         def_id: DefId,
     ) -> ty::EarlyBinder<'tcx, impl IntoIterator<Item = (ty::Clause<'tcx>, Span)>> {
-        self.explicit_super_predicates_of(def_id).map_bound(|preds| preds.into_iter().copied())
+        self.explicit_super_clauses_of(def_id).map_bound(|preds| preds.into_iter().copied())
     }
 
-    fn explicit_implied_predicates_of(
+    fn explicit_implied_clauses_of(
         self,
         def_id: DefId,
     ) -> ty::EarlyBinder<'tcx, impl IntoIterator<Item = (ty::Clause<'tcx>, Span)>> {
-        self.explicit_implied_predicates_of(def_id).map_bound(|preds| preds.into_iter().copied())
+        self.explicit_implied_clauses_of(def_id).map_bound(|preds| preds.into_iter().copied())
     }
 
     fn impl_super_outlives(
@@ -791,8 +793,44 @@ impl<'tcx> Interner for TyCtxt<'tcx> {
     fn evaluate_root_goal_for_proof_tree_raw(
         self,
         canonical_goal: CanonicalInput<'tcx>,
+        root_depth: usize,
     ) -> (QueryResult<'tcx>, &'tcx inspect::Probe<TyCtxt<'tcx>>) {
-        self.evaluate_root_goal_for_proof_tree_raw(canonical_goal)
+        self.evaluate_root_goal_for_proof_tree_raw((canonical_goal, root_depth))
+    }
+
+    fn emit_next_solver_overflow_fcw(self, predicate: ty::Predicate<'tcx>, span: Span) {
+        self.emit_node_span_lint(
+            rustc_session::lint::builtin::RECURSION_DEPTH_EXCEEDING_LIMIT,
+            CRATE_HIR_ID,
+            span,
+            rustc_errors::DiagDecorator(|diag| {
+                // FIXME: share this with overflow error in fulfillment instead of duplicating.
+                let pred_str = {
+                    let s = predicate.to_string();
+                    if s.len() > 50 {
+                        let mut p: FmtPrinter<'_, '_> =
+                            FmtPrinter::new_with_limit(self, Namespace::TypeNS, Limit(6));
+                        predicate.print(&mut p).unwrap();
+                        p.into_buffer()
+                    } else {
+                        s
+                    }
+                };
+                diag.primary_message(format!(
+                    "overflow evaluating the requirement `{pred_str}`",
+                ));
+                diag.help(format!(
+                    "consider increasing the recursion limit by adding a \
+                     `#![recursion_limit = \"{}\"]` attribute to your crate (`{}`)",
+                    self.recursion_limit() * 2,
+                    self.crate_name(LOCAL_CRATE),
+                ));
+                diag.help(
+                    "or consider adding a manual `impl` of auto traits like `Send` for intermediate types, if auto traits are involved",
+                );
+                diag.note("this lint is attached to the whole crate and can't be disabled on a per-function basis");
+            }),
+        )
     }
 
     fn item_name(self, id: DefId) -> Symbol {

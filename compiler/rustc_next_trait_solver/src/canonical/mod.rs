@@ -19,12 +19,12 @@ use rustc_type_ir::relate::{
 };
 use rustc_type_ir::{
     self as ty, Canonical, CanonicalVarKind, CanonicalVarValues, InferCtxtLike, Interner, Region,
-    TypeFoldable, TypingMode, TypingModeEqWrapper,
+    TypeFoldable, TypingMode, TypingModeEqWrapper, eager_resolve_vars,
 };
+use thin_vec::ThinVec;
 use tracing::instrument;
 
 use crate::delegate::SolverDelegate;
-use crate::resolve::eager_resolve_vars;
 use crate::solve::{
     CanonicalInput, CanonicalResponse, Certainty, ExternalConstraintsData,
     ExternalRegionConstraints, Goal, NestedNormalizationGoals, QueryInput, Response,
@@ -58,7 +58,7 @@ pub(super) fn canonicalize_goal<D, I>(
     goal: Goal<I, I::Predicate>,
     opaque_types: &[(ty::OpaqueTypeKey<I>, I::Ty)],
     typing_mode: TypingMode<I>,
-) -> (Vec<I::GenericArg>, CanonicalInput<I, I::Predicate>)
+) -> (ThinVec<I::GenericArg>, CanonicalInput<I, I::Predicate>)
 where
     D: SolverDelegate<Interner = I>,
     I: Interner,
@@ -392,12 +392,10 @@ where
         }
 
         let infcx = self.infcx;
-        // FIXME: make this a debug_assert.
-        // Currently proof tree evaluation can unify infer vars in original
-        // vars while not resolving them.
-        // See `tests/ui/traits/next-solver/transmute-from-async-closure.rs`
+        // Proof tree evaluation can unify inference variables in the original
+        // values without eagerly resolving them.
         let a = infcx.shallow_resolve_const(a);
-        debug_assert_eq!(b, infcx.shallow_resolve_const(b));
+        let b = infcx.shallow_resolve_const(b);
         match (a.kind(), b.kind()) {
             (
                 ty::ConstKind::Infer(ty::InferConst::Var(a_vid)),
@@ -544,7 +542,7 @@ pub fn instantiate_canonical_state<D, I, T>(
     delegate: &D,
     span: I::Span,
     param_env: I::ParamEnv,
-    orig_values: &mut Vec<I::GenericArg>,
+    orig_values: &mut ThinVec<I::GenericArg>,
     state: inspect::CanonicalState<I, T>,
 ) -> T
 where

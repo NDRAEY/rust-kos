@@ -2016,6 +2016,10 @@ pub mod parse {
                     match opt {
                         "bti" => slot.bti = true,
                         "pac-ret" if slot.pac_ret.is_none() => {
+                            // Note: some targets only support certain keys (Windows on Arm only
+                            // supports Key B) and this possible discrepancy is handled by the
+                            // session's `branch_protection` accessor, when we have both the target
+                            // tuple and branch protection information available.
                             slot.pac_ret = Some(PacRet { leaf: false, pc: false, key: PAuthKey::A })
                         }
                         "leaf" => match slot.pac_ret.as_mut() {
@@ -2385,6 +2389,7 @@ options! {
         (default: no)"),
     box_noalias: bool = (true, parse_bool, [TRACKED],
         "emit noalias metadata for box (default: yes)"),
+    #[rustc_lint_opt_deny_field_access("use `Session::branch_protection` instead of this field")]
     branch_protection: Option<BranchProtection> = (None, parse_branch_protection, [TRACKED] { TARGET_MODIFIER: BranchProtection },
         "set options for branch target identification and pointer authentication on AArch64"),
     build_sdylib_interface: bool = (false, parse_bool, [UNTRACKED],
@@ -2531,6 +2536,8 @@ options! {
         "display unnamed regions as `'<id>`, using a non-ident unique id (default: no)"),
     ignore_directory_in_diagnostics_source_blocks: Vec<String> = (Vec::new(), parse_string_push, [UNTRACKED],
         "do not display the source code block in diagnostics for files in the directory"),
+    implicit_sysroot_deps: bool = (true, parse_bool, [TRACKED],
+        "allows rust to search sysroot for a crate's dependencies (default: yes)"),
     incremental_ignore_spans: bool = (false, parse_bool, [TRACKED],
         "ignore spans during ICH computation -- used for testing (default: no)"),
     incremental_info: bool = (false, parse_bool, [UNTRACKED],
@@ -2793,6 +2800,10 @@ written to standard error output)"),
         "enable generalizing pointer types (default: no)"),
     sanitizer_cfi_normalize_integers: Option<bool> = (None, parse_opt_bool, [TRACKED] { TARGET_MODIFIER: SanitizerCfiNormalizeIntegers },
         "enable normalizing integer types (default: no)"),
+    sanitizer_cfi_diag: Option<bool> = (None, parse_opt_bool, [TRACKED],
+        "enable CFI diagnostics (default: no)"),
+    sanitizer_cfi_recover: Option<bool> = (None, parse_opt_bool, [TRACKED],
+        "enable CFI recovery (default: no)"),
     sanitizer_dataflow_abilist: Vec<String> = (Vec::new(), parse_comma_list, [TRACKED],
         "additional ABI list files that control how shadow parameters are passed (comma separated)"),
     sanitizer_kcfi_arity: Option<bool> = (None, parse_opt_bool, [TRACKED],

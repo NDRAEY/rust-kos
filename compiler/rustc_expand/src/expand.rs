@@ -1120,9 +1120,7 @@ pub fn parse_ast_fragment<'a>(
             let mut stmts = SmallVec::new();
             // Won't make progress on a `}`.
             while this.token != token::Eof && this.token != token::CloseBrace {
-                if let Some(stmt) = this.parse_full_stmt(AttemptLocalParseRecovery::Yes)? {
-                    stmts.push(stmt);
-                }
+                stmts.push(this.parse_full_stmt(AttemptLocalParseRecovery::Yes)?);
             }
             AstFragment::Stmts(stmts)
         }
@@ -1380,7 +1378,7 @@ impl InvocationCollectorNode for Box<ast::Item> {
                     lint_store.pre_expansion_lint(
                         ecx.sess,
                         ecx.ecfg.features,
-                        ecx.resolver.registered_tools(),
+                        ecx.resolver.registered_lint_tools(),
                         ecx.current_expansion.lint_node_id,
                         &node.attrs,
                         &items,
@@ -2233,7 +2231,7 @@ impl<'a, 'b> InvocationCollector<'a, 'b> {
                 self.cx.current_expansion.lint_node_id,
                 Some(self.cx.ecfg.features),
                 ShouldEmit::ErrorsAndLints { recovery: Recovery::Allowed },
-                Some(self.cx.resolver.registered_tools()),
+                Some(self.cx.resolver.registered_attr_tools()),
             );
 
             let current_span = if let Some(sp) = span { sp.to(attr.span) } else { attr.span };

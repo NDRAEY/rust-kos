@@ -15,11 +15,12 @@ use rustc_data_structures::sync::Lock;
 use rustc_data_structures::unhash::UnhashMap;
 use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
 use rustc_expand::proc_macro::{AttrProcMacro, BangProcMacro, DeriveProcMacro};
+use rustc_hir::Safety;
+use rustc_hir::attrs::CanonicalSymbols;
 use rustc_hir::def::Res;
 use rustc_hir::def_id::{CRATE_DEF_INDEX, LOCAL_CRATE};
 use rustc_hir::definitions::{DefPath, DefPathData};
 use rustc_hir::diagnostic_items::DiagnosticItems;
-use rustc_hir::{CanonicalSymbols, Safety};
 use rustc_index::Idx;
 use rustc_middle::middle::lib_features::LibFeatures;
 use rustc_middle::mir::interpret::{AllocDecodingSession, AllocDecodingState};
@@ -1432,17 +1433,26 @@ impl CrateMetadata {
             .attributes
             .get(self, id)
             .unwrap_or_else(|| {
-                // Structure and variant constructors don't have any attributes encoded for them,
-                // but we assume that someone passing a constructor ID actually wants to look at
-                // the attributes on the corresponding struct or variant.
                 let def_key = self.def_key(id);
-                assert_eq!(def_key.disambiguated_data.data, DefPathData::Ctor);
-                let parent_id = def_key.parent.expect("no parent for a constructor");
-                self.root
-                    .tables
-                    .attributes
-                    .get(self, parent_id)
-                    .expect("no encoded attributes for a structure or variant")
+                match def_key.disambiguated_data.data {
+                    DefPathData::Ctor => {
+                        // Structure and variant constructors don't have any attributes encoded for them,
+                        // but we assume that someone passing a constructor ID actually wants to look at
+                        // the attributes on the corresponding struct or variant.
+                        assert_eq!(def_key.disambiguated_data.data, DefPathData::Ctor);
+                        let parent_id = def_key.parent.expect("no parent for a constructor");
+                        self.root
+                            .tables
+                            .attributes
+                            .get(self, parent_id)
+                            .expect("no encoded attributes for a structure or variant")
+                    }
+                    DefPathData::SyntheticCoroutineBody => {
+                        // SyntheticCoroutineBodies cannot have attributes
+                        LazyArray::default()
+                    }
+                    _ => panic!("Definition key {def_key:?} of type `{:?}` did not have any attributes stored", def_key.disambiguated_data.data)
+                }
             })
             .decode((self, tcx))
     }

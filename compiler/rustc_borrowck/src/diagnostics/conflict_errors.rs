@@ -129,7 +129,7 @@ impl<'diag, 'tcx> MirBorrowckCtxt<'_, 'diag, 'tcx> {
             }
 
             let is_partial_move = move_site_vec.iter().any(|move_site| {
-                let move_out = self.move_data.moves[(*move_site).moi];
+                let move_out = self.move_data.move_outs[(*move_site).moi];
                 let moved_place = &self.move_data.move_paths[move_out.path].place;
                 // `*(_1)` where `_1` is a `Box` is actually a move out.
                 let is_box_move = moved_place.as_ref().projection == [ProjectionElem::Deref]
@@ -215,7 +215,7 @@ impl<'diag, 'tcx> MirBorrowckCtxt<'_, 'diag, 'tcx> {
             let mut seen_spans = FxIndexSet::default();
 
             for move_site in &move_site_vec {
-                let move_out = self.move_data.moves[(*move_site).moi];
+                let move_out = self.move_data.move_outs[(*move_site).moi];
                 let moved_place = &self.move_data.move_paths[move_out.path].place;
 
                 let move_spans = self.move_spans(moved_place.as_ref(), move_out.source);
@@ -281,7 +281,7 @@ impl<'diag, 'tcx> MirBorrowckCtxt<'_, 'diag, 'tcx> {
                 _ => true,
             };
 
-            let mpi = self.move_data.moves[move_out_indices[0]].path;
+            let mpi = self.move_data.move_outs[move_out_indices[0]].path;
             let place = &self.move_data.move_paths[mpi].place;
             let ty = place.ty(self.body, self.infcx.tcx).ty;
 
@@ -671,7 +671,7 @@ impl<'diag, 'tcx> MirBorrowckCtxt<'_, 'diag, 'tcx> {
     ) -> Option<ty::Mutability> {
         let tcx = self.infcx.tcx;
         let sig = tcx.fn_sig(callee_did).instantiate_identity().skip_binder();
-        let clauses = tcx.predicates_of(callee_did);
+        let clauses = tcx.clauses_of(callee_did);
 
         let generic_args = match call_expr.kind {
             // For method calls, generic arguments are attached to the call node.
@@ -688,7 +688,7 @@ impl<'diag, 'tcx> MirBorrowckCtxt<'_, 'diag, 'tcx> {
 
         // First, is there at least one method on one of `param`'s trait bounds?
         // This keeps us from suggesting borrowing the argument to `mem::drop`, e.g.
-        if !clauses.instantiate_identity(tcx).predicates.iter().any(|clause| {
+        if !clauses.instantiate_identity(tcx).clauses.iter().any(|clause| {
             clause.as_trait_clause().is_some_and(|tc| {
                 tc.self_ty().skip_binder().is_param(param.index)
                     && tc.polarity() == ty::PredicatePolarity::Positive
@@ -738,8 +738,8 @@ impl<'diag, 'tcx> MirBorrowckCtxt<'_, 'diag, 'tcx> {
                 return false;
             }
 
-            // Test the callee's predicates, substituting in `ref_ty` for the moved argument type.
-            clauses.instantiate(tcx, new_args).predicates.iter().all(|clause| {
+            // Test the callee's clauses, substituting in `ref_ty` for the moved argument type.
+            clauses.instantiate(tcx, new_args).clauses.iter().all(|clause| {
                 // Normalize before testing to see through type aliases and projections.
                 let normalized = tcx
                     .try_normalize_erasing_regions(
@@ -3855,9 +3855,9 @@ impl<'diag, 'tcx> MirBorrowckCtxt<'_, 'diag, 'tcx> {
                 // worry about the other case: that is, if there is a move of a.b.c, it is already
                 // marked as a move of a.b and a as well, so we will generate the correct errors
                 // there.
-                for moi in &self.move_data.loc_map[location] {
+                for moi in &self.move_data.move_out_loc_map[location] {
                     debug!("report_use_of_moved_or_uninitialized: moi={:?}", moi);
-                    let path = self.move_data.moves[*moi].path;
+                    let path = self.move_data.move_outs[*moi].path;
                     if mpis.contains(&path) {
                         debug!(
                             "report_use_of_moved_or_uninitialized: found {:?}",
