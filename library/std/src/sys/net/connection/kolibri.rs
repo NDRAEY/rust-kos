@@ -199,42 +199,62 @@ pub struct TcpListener(!);
 
 impl TcpListener {
     pub fn bind<A: ToSocketAddrs>(_: A) -> io::Result<TcpListener> {
+        writeln!(kos_api::debugboard(), "TcpListener: bind unimplemented").unwrap();
+
         unsupported()
     }
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
+        writeln!(kos_api::debugboard(), "TcpListener: socket_addr unimplemented").unwrap();
+
         self.0
     }
 
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
+        writeln!(kos_api::debugboard(), "TcpListener: accept unimplemented").unwrap();
+
         self.0
     }
 
     pub fn duplicate(&self) -> io::Result<TcpListener> {
+        writeln!(kos_api::debugboard(), "TcpListener: duplicate unimplemented").unwrap();
+
         self.0
     }
 
     pub fn set_ttl(&self, _: u32) -> io::Result<()> {
+        writeln!(kos_api::debugboard(), "TcpListener: set_ttl unimplemented").unwrap();
+
         self.0
     }
 
     pub fn ttl(&self) -> io::Result<u32> {
+        writeln!(kos_api::debugboard(), "TcpListener: ttl unimplemented").unwrap();
+
         self.0
     }
 
     pub fn set_only_v6(&self, _: bool) -> io::Result<()> {
+        writeln!(kos_api::debugboard(), "TcpListener: set_only_v6 unimplemented").unwrap();
+
         self.0
     }
 
     pub fn only_v6(&self) -> io::Result<bool> {
+        writeln!(kos_api::debugboard(), "TcpListener: only_v6 unimplemented").unwrap();
+
         self.0
     }
 
     pub fn take_error(&self) -> io::Result<Option<io::Error>> {
+        writeln!(kos_api::debugboard(), "TcpListener: take_error unimplemented").unwrap();
+
         self.0
     }
 
     pub fn set_nonblocking(&self, _: bool) -> io::Result<()> {
+        writeln!(kos_api::debugboard(), "TcpListener: set_nonblocking unimplemented").unwrap();
+
         self.0
     }
 }
@@ -249,62 +269,78 @@ pub struct UdpSocket(!);
 
 impl UdpSocket {
     pub fn bind<A: ToSocketAddrs>(_: A) -> io::Result<UdpSocket> {
+        writeln!(kos_api::debugboard(), "UdpSocket: bind unimplemented").unwrap();
+
         unsupported()
     }
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        writeln!(kos_api::debugboard(), "UdpSocket: peer_addr unimplemented").unwrap();
         self.0
     }
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
+        writeln!(kos_api::debugboard(), "UdpSocket: socket_addr unimplemented").unwrap();
         self.0
     }
 
     pub fn recv_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        writeln!(kos_api::debugboard(), "UdpSocket: recv_from unimplemented").unwrap();
         self.0
     }
 
     pub fn peek_from(&self, _: &mut [u8]) -> io::Result<(usize, SocketAddr)> {
+        writeln!(kos_api::debugboard(), "UdpSocket: peek_from unimplemented").unwrap();
         self.0
     }
 
     pub fn send_to(&self, _: &[u8], _: &SocketAddr) -> io::Result<usize> {
+        writeln!(kos_api::debugboard(), "UdpSocket: send_to unimplemented").unwrap();
         self.0
     }
 
     pub fn duplicate(&self) -> io::Result<UdpSocket> {
+        writeln!(kos_api::debugboard(), "UdpSocket: duplicate unimplemented").unwrap();
         self.0
     }
 
     pub fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+        writeln!(kos_api::debugboard(), "UdpSocket: set_read_timeout unimplemented").unwrap();
         self.0
     }
 
     pub fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+        writeln!(kos_api::debugboard(), "UdpSocket: set_write_timeout unimplemented").unwrap();
         self.0
     }
 
     pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
+        writeln!(kos_api::debugboard(), "UdpSocket: read_timeout unimplemented").unwrap();
         self.0
     }
 
     pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
+        writeln!(kos_api::debugboard(), "UdpSocket: write_timeout unimplemented").unwrap();
         self.0
     }
 
     pub fn set_broadcast(&self, _: bool) -> io::Result<()> {
+        writeln!(kos_api::debugboard(), "UdpSocket: set_broadcast unimplemented").unwrap();
         self.0
     }
 
     pub fn broadcast(&self) -> io::Result<bool> {
+        writeln!(kos_api::debugboard(), "UdpSocket: broadcast unimplemented").unwrap();
         self.0
     }
 
     pub fn set_multicast_loop_v4(&self, _: bool) -> io::Result<()> {
+        writeln!(kos_api::debugboard(), "UdpSocket: set_multicast_loop_v4 unimplemented").unwrap();
         self.0
     }
 
     pub fn multicast_loop_v4(&self) -> io::Result<bool> {
+        writeln!(kos_api::debugboard(), "UdpSocket: multicast_loop_v4 unimplemented").unwrap();
         self.0
     }
 
@@ -389,5 +425,7 @@ impl Iterator for LookupHost {
 }
 
 pub fn lookup_host(_host: &str, _port: u16) -> io::Result<LookupHost> {
+    writeln!(kos_api::debugboard(), "net: lookup_host unimplemented").unwrap();
+
     unsupported()
 }

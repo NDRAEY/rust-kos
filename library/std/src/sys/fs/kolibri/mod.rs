@@ -676,10 +676,11 @@ pub fn lstat(_p: &Path) -> io::Result<FileAttr> {
     unsupported()
 }
 
-pub fn canonicalize(_p: &Path) -> io::Result<PathBuf> {
-    writeln!(crate::sys::pal::api::debugboard(), "unimplemented: ::canonicalize").unwrap();
+pub fn canonicalize(path: &Path) -> io::Result<PathBuf> {
+    writeln!(crate::sys::pal::api::debugboard(), "warning: kludged std::fs::canonicalize").unwrap();
 
-    unsupported()
+    // XXX: This is a kludge. KolibriOS doesn't have a concept of canonical paths, so just return the path as-is.
+    Ok(path.to_path_buf())
 }
 
 pub fn copy(_from: &Path, _to: &Path) -> io::Result<u64> {
