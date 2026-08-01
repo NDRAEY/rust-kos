@@ -10,9 +10,9 @@ use crate::ffi::c_char;
 use crate::sys::pal::dll;
 
 struct Console {
-    con_init: extern "stdcall" fn(u32, u32, u32, u32, *const c_char),
-    con_write_string: extern "stdcall" fn(*const c_char, u32),
-    con_exit: extern "stdcall" fn(bool),
+    con_init: unsafe extern "stdcall" fn(u32, u32, u32, u32, *const c_char),
+    con_write_string: unsafe extern "stdcall" fn(*const c_char, u32),
+    con_exit: unsafe extern "stdcall" fn(bool),
 
     shown: AtomicBool
 }
@@ -38,7 +38,7 @@ impl Console {
         const DEFAULT: u32 = 0xffff_ffff;
 
         if !self.shown.load(crate::sync::atomic::Ordering::Acquire) {
-            (self.con_init)(DEFAULT, DEFAULT, DEFAULT, DEFAULT, c"Rust Console".as_ptr());
+            unsafe { (self.con_init)(DEFAULT, DEFAULT, DEFAULT, DEFAULT, c"Rust Console".as_ptr()) };
 
             self.shown.store(true, crate::sync::atomic::Ordering::Release);
         }
@@ -47,14 +47,14 @@ impl Console {
     pub fn write(&self, data: &[u8]) {
         self.ensure_initialized();
 
-        (self.con_write_string)(data.as_ptr().cast(), data.len() as _);
+        unsafe { (self.con_write_string)(data.as_ptr().cast(), data.len() as _) };
     }
 }
 
 impl Drop for Console {
     fn drop(&mut self) {
         if self.shown.load(crate::sync::atomic::Ordering::Acquire) {
-            (self.con_exit)(false);
+            unsafe { (self.con_exit)(false) };
         }
     }
 }

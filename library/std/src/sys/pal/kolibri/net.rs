@@ -54,6 +54,16 @@ pub struct SocketAddr {
     _reserved: [u8; 8],
 }
 
+impl SocketAddr {
+    pub fn to_ipv4_socketaddr(&self) -> crate::net::SocketAddr {
+        // TODO: Make sure `self.ip` has correct endianness.
+        crate::net::SocketAddr::V4(crate::net::SocketAddrV4::new(
+            crate::net::Ipv4Addr::from(self.ip.to_le_bytes()),
+            self.port.to_be()
+        ))
+    }
+}
+
 const _: &[()] = &[
     assert!(core::mem::offset_of!(SocketAddr, family) == 0),
     assert!(core::mem::offset_of!(SocketAddr, port) == 2),
@@ -181,4 +191,60 @@ impl SocketStream {
             Ok(bytes_copied)
         }
     }
+}
+
+
+use crate::sys::pal::dll;
+
+#[repr(C)]
+// SAFETY: This struct is used to interface with the KolibriOS' network.obj `getaddrinfo` function, which expects a C-style struct layout.
+// The fields are defined to match the expected layout of the `addrinfo` struct in C.
+#[derive(Debug, Copy, Clone)]
+pub struct AddrInfo {
+    pub ai_flags: i32,
+    pub ai_family: i32,
+    pub ai_socktype: i32,
+    pub ai_protocol: i32,
+    pub ai_addrlen: usize,
+    pub ai_canonname: *mut crate::ffi::c_char,
+    pub ai_addr: *mut self::SocketAddr,
+    pub ai_next: *mut AddrInfo,
+}
+
+type GetAddrInfoFn = unsafe extern "stdcall" fn(
+    node: *const crate::ffi::c_char,
+    service: *const crate::ffi::c_char,
+    hints: *const AddrInfo,
+    res: *mut *mut AddrInfo,
+) -> i32;
+
+type FreeAddrInfoFn = unsafe extern "stdcall" fn(res: *mut AddrInfo);
+
+pub struct NetworkDLL {
+    pub getaddrinfo: GetAddrInfoFn,
+    pub freeaddrinfo: FreeAddrInfoFn,
+}
+
+impl NetworkDLL {
+    pub fn init_from_lib() -> Option<Self> {
+        let lib = dll::load_dll(c"/sys/lib/network.obj")?;
+
+        let getaddrinfo_hdl = lib.iter().find(|en| en.name() == c"getaddrinfo")?;
+        let freeaddrinfo_hdl = lib.iter().find(|en| en.name() == c"freeaddrinfo")?;
+
+        Some(NetworkDLL {
+            getaddrinfo: *getaddrinfo_hdl.data::<GetAddrInfoFn>(),
+            freeaddrinfo: *freeaddrinfo_hdl.data::<FreeAddrInfoFn>(),
+        })
+    }
+}
+
+static NETWORK_DLL: crate::sync::OnceLock<NetworkDLL> = crate::sync::OnceLock::new();
+
+use crate::io;
+
+pub fn network() -> &'static NetworkDLL {
+    NETWORK_DLL.get_or_try_init(|| {
+        NetworkDLL::init_from_lib().ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed to load network.obj DLL"))
+    }).unwrap()
 }

@@ -159,8 +159,10 @@ impl TcpStream {
     }
 
     pub fn set_nodelay(&self, _: bool) -> io::Result<()> {
-        writeln!(kos_api::debugboard(), "net::set_nodelay unimplemented").unwrap();
-        unsupported()
+        writeln!(kos_api::debugboard(), "net::set_nodelay unimplemented, BUT RETURNS Ok(()) for demo purposes.").unwrap();
+        // unsupported()
+
+        Ok(())
     }
 
     pub fn nodelay(&self) -> io::Result<bool> {
@@ -415,17 +417,86 @@ impl fmt::Debug for UdpSocket {
     }
 }
 
-pub struct LookupHost(!);
+use kos_net::AddrInfo;
 
-impl Iterator for LookupHost {
-    type Item = SocketAddr;
-    fn next(&mut self) -> Option<SocketAddr> {
-        self.0
+pub struct LookupHost {
+    root: AddrInfo,  // Keep a reference to the root AddrInfo to ensure memory is freed when LookupHost is dropped.
+    inner: Option<AddrInfo>,
+}
+
+impl LookupHost {
+    fn new(inner: AddrInfo) -> Self {
+        Self { root: inner, inner: Some(inner) }
     }
 }
 
-pub fn lookup_host(_host: &str, _port: u16) -> io::Result<LookupHost> {
-    writeln!(kos_api::debugboard(), "net: lookup_host unimplemented").unwrap();
+impl Iterator for LookupHost {
+    type Item = SocketAddr;
 
-    unsupported()
+    fn next(&mut self) -> Option<SocketAddr> {
+        writeln!(kos_api::debugboard(), "net: next: {:?}", self.inner).unwrap();
+
+        let inner = self.inner?;
+
+        if inner.ai_addr.is_null() {
+            return None;
+        }
+
+        let sockaddr = unsafe { &*inner.ai_addr };
+        let socket_addr = sockaddr.to_ipv4_socketaddr();
+
+        // Move to the next AddrInfo in the linked list
+        self.inner = if inner.ai_next.is_null() {
+            None
+        } else {
+            Some(unsafe { *inner.ai_next })
+        };
+
+        Some(socket_addr)
+    }
+}
+
+impl Drop for LookupHost {
+    fn drop(&mut self) {
+        let freeaddrinfo = kos_net::network().freeaddrinfo;
+
+        unsafe { freeaddrinfo(&mut self.root) };
+    }
+}
+
+pub fn lookup_host(host: &str, port: u16) -> io::Result<LookupHost> {
+    writeln!(kos_api::debugboard(), "net: lookup_host unimplemented").unwrap();
+    writeln!(kos_api::debugboard(), "net: dial \"{}:{}\"", host, port).unwrap();
+
+    let getaddrinfo = kos_net::network().getaddrinfo;
+
+    let hints = AddrInfo {
+        ai_flags: 0,
+        ai_family: kos_net::SocketAddrFamily::Inet4 as i32,
+        ai_socktype: kos_net::SocketType::Stream as i32,
+        ai_protocol: kos_net::IpProtocol::Tcp as i32,
+        ai_addrlen: 0,
+        ai_addr: crate::ptr::null_mut(),
+        ai_canonname: crate::ptr::null_mut(),
+        ai_next: crate::ptr::null_mut(),
+    };
+
+    let mut res: *mut AddrInfo = crate::ptr::null_mut();
+
+    let node_cstr = crate::ffi::CString::new(host).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid host string"))?;
+    let service_cstr = crate::ffi::CString::new(port.to_string()).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid port string"))?;
+
+    let result = unsafe { getaddrinfo(node_cstr.as_ptr(), service_cstr.as_ptr(), &hints, &mut res) };
+
+    writeln!(kos_api::debugboard(), "net: getaddrinfo result: {}", result).unwrap();
+
+    if result != 0 {
+        return Err(io::Error::new(io::ErrorKind::Other, format!("getaddrinfo failed with error code {}", result)));
+    }
+
+    if res.is_null() {
+        return Err(io::Error::new(io::ErrorKind::Other, "getaddrinfo returned no results"));
+    }
+
+    Ok(LookupHost::new(unsafe { *res }))
 }
