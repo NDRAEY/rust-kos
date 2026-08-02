@@ -64,7 +64,7 @@ pub unsafe fn syscall4(nr: usize, p1: usize, p2: usize, p3: usize) -> usize {
 
 pub unsafe fn syscall5(nr: usize, p1: usize, p2: usize, p3: usize, p4: usize) -> usize {
     let eax: usize;
- 
+
     unsafe {
         core::arch::asm!(
             "push esi",
@@ -73,6 +73,7 @@ pub unsafe fn syscall5(nr: usize, p1: usize, p2: usize, p3: usize, p4: usize) ->
             "pop esi",
             p4 = in(reg) p4,
             inlateout("eax") nr => eax,
+            in("ebx") p1,
             in("ecx") p2,
             in("edx") p3,
         );
