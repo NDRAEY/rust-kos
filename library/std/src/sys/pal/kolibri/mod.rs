@@ -5,12 +5,14 @@ mod common;
 pub use common::*;
 
 pub mod api;
+pub mod console;
 pub mod dll;
 pub mod error;
 pub mod fs;
 pub mod futex;
 pub mod net;
 pub mod sbrk;
+pub mod shm;
 pub mod time;
 
 mod syscall;

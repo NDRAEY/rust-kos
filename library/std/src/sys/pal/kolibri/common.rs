@@ -32,6 +32,9 @@ pub unsafe fn init(_argc: isize, _argv: *const *const u8, _sigpipe: u8) {
 // SAFETY: must be called only once during runtime cleanup.
 // NOTE: this is not guaranteed to run, for example when the program aborts.
 pub unsafe fn cleanup() {
+    // Deinit console.
+    drop(crate::sys::stdio::GLOBAL_CONSOLE.lock().unwrap().take());
+
     writeln!(super::api::debugboard(), "TOOD: Do cleanup").ok();
 }
 

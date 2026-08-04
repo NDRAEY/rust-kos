@@ -4,62 +4,69 @@ pub struct Stdin;
 pub struct Stdout;
 pub struct Stderr;
 
-use crate::sync::atomic::AtomicBool;
+// use crate::sync::atomic::AtomicBool;
 
-use crate::ffi::c_char;
-use crate::sys::pal::dll;
+// use crate::ffi::c_char;
+// use crate::sys::pal::dll;
+use crate::sys::pal::console;
 
-struct Console {
-    con_init: unsafe extern "stdcall" fn(u32, u32, u32, u32, *const c_char),
-    con_write_string: unsafe extern "stdcall" fn(*const c_char, u32),
-    con_exit: unsafe extern "stdcall" fn(bool),
+// pub struct Console {
+//     con_init: unsafe extern "stdcall" fn(u32, u32, u32, u32, *const c_char),
+//     con_write_string: unsafe extern "stdcall" fn(*const c_char, u32),
+//     con_exit: unsafe extern "stdcall" fn(bool),
 
-    shown: AtomicBool
+//     shown: AtomicBool
+// }
+
+// impl Console {
+//     pub fn init_from_lib() -> Option<Self> {
+//         let lib = dll::load_dll(c"/sys/lib/console.obj")?;
+
+//         let con_init = lib.iter().find(|en| en.name() == c"con_init")?;
+//         let con_write_string = lib.iter().find(|en| en.name() == c"con_write_string")?;
+//         let con_exit = lib.iter().find(|en| en.name() == c"con_exit")?;
+
+//         Some(Console {
+//             con_init: *con_init.data(),
+//             con_write_string: *con_write_string.data(),
+//             con_exit: *con_exit.data(),
+
+//             shown: AtomicBool::new(false)
+//         })
+//     }
+
+//     fn ensure_initialized(&self) {
+//         const DEFAULT: u32 = 0xffff_ffff;
+
+//         if !self.shown.load(crate::sync::atomic::Ordering::Acquire) {
+//             unsafe { (self.con_init)(DEFAULT, DEFAULT, DEFAULT, DEFAULT, c"Rust Console".as_ptr()) };
+
+//             self.shown.store(true, crate::sync::atomic::Ordering::Release);
+//         }
+//     }
+
+//     pub fn write(&self, data: &[u8]) {
+//         self.ensure_initialized();
+
+//         unsafe { (self.con_write_string)(data.as_ptr().cast(), data.len() as _) };
+//     }
+// }
+
+// impl Drop for Console {
+//     fn drop(&mut self) {
+//         if self.shown.load(crate::sync::atomic::Ordering::Acquire) {
+//             unsafe { (self.con_exit)(false) };
+//         }
+//     }
+// }
+
+// pub static GLOBAL_CONSOLE: crate::sync::Mutex<crate::sync::OnceLock<Console>> = crate::sync::Mutex::new(crate::sync::OnceLock::new());
+pub static GLOBAL_CONSOLE: crate::sync::Mutex<crate::sync::OnceLock<console::Console>> = crate::sync::Mutex::new(crate::sync::OnceLock::new());
+
+fn ensure_initialized() {
+    // TODO: If this backend fails, get back to old one.
+    GLOBAL_CONSOLE.lock().unwrap().get_or_init(|| console::Console::new().expect("Console initialization failed. Try running app in SHELL."));
 }
-
-impl Console {
-    pub fn init_from_lib() -> Option<Self> {
-        let lib = dll::load_dll(c"/sys/lib/console.obj")?;
-
-        let con_init = lib.iter().find(|en| en.name() == c"con_init")?;
-        let con_write_string = lib.iter().find(|en| en.name() == c"con_write_string")?;
-        let con_exit = lib.iter().find(|en| en.name() == c"con_exit")?;
-
-        Some(Console {
-            con_init: *con_init.data(),
-            con_write_string: *con_write_string.data(),
-            con_exit: *con_exit.data(),
-
-            shown: AtomicBool::new(false)
-        })
-    }
-
-    fn ensure_initialized(&self) {
-        const DEFAULT: u32 = 0xffff_ffff;
-
-        if !self.shown.load(crate::sync::atomic::Ordering::Acquire) {
-            unsafe { (self.con_init)(DEFAULT, DEFAULT, DEFAULT, DEFAULT, c"Rust Console".as_ptr()) };
-
-            self.shown.store(true, crate::sync::atomic::Ordering::Release);
-        }
-    }
-
-    pub fn write(&self, data: &[u8]) {
-        self.ensure_initialized();
-
-        unsafe { (self.con_write_string)(data.as_ptr().cast(), data.len() as _) };
-    }
-}
-
-impl Drop for Console {
-    fn drop(&mut self) {
-        if self.shown.load(crate::sync::atomic::Ordering::Acquire) {
-            unsafe { (self.con_exit)(false) };
-        }
-    }
-}
-
-static GLOBAL_CONSOLE: crate::sync::OnceLock<Console> = crate::sync::OnceLock::new();
 
 impl Stdin {
     pub const fn new() -> Stdin {
@@ -120,9 +127,9 @@ impl Stdout {
 impl io::Write for Stdout {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        GLOBAL_CONSOLE.get_or_init(|| Console::init_from_lib().expect("Console initialization failed!"));
+        ensure_initialized();
         
-        GLOBAL_CONSOLE.get().unwrap().write(buf);
+        GLOBAL_CONSOLE.lock().unwrap().get_mut().unwrap().write(buf);
 
         Ok(buf.len())
     }
@@ -140,9 +147,9 @@ impl io::Write for Stdout {
 
     #[inline]
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        GLOBAL_CONSOLE.get_or_init(|| Console::init_from_lib().expect("Console initialization failed!"));
+        ensure_initialized();
 
-        GLOBAL_CONSOLE.get().unwrap().write(buf);
+        GLOBAL_CONSOLE.lock().unwrap().get_mut().unwrap().write(buf);
 
         Ok(())
     }

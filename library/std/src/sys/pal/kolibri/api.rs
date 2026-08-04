@@ -76,7 +76,7 @@ pub fn time() -> super::time::Time {
     super::time::Time {
         hour: bcd2dec(bcd_h as u8),
         minute: bcd2dec(bcd_m as u8),
-        second: bcd2dec(bcd_s as u8)
+        second: bcd2dec(bcd_s as u8),
     }
 }
 
@@ -90,7 +90,7 @@ pub fn date() -> super::time::Date {
     super::time::Date {
         year: bcd2dec(bcd_y as u8) as u16 + 2000,
         month: bcd2dec(bcd_m as u8),
-        day: bcd2dec(bcd_d as u8)
+        day: bcd2dec(bcd_d as u8),
     }
 }
 
@@ -111,4 +111,49 @@ pub fn sleep_this_thread(nanos: u128) {
 
 pub fn spawn_thread(entry_point: *const (), stack_top: *mut usize) -> usize {
     unsafe { syscall4(51, 1, entry_point.addr(), stack_top.addr()) }
+}
+
+#[repr(C, packed(1))]
+pub struct ProcessInfo {
+    pub ticks: usize,
+    pub window_position: u16,
+    pub slot_nr: u16,
+    pub rsv0: u16,
+    pub process_name: [core::ffi::c_char; 11],
+    pub rsv1: u8,
+    pub proc_address: u32,
+    pub memory_used: u32,
+    pub pid_tid: u32,
+    pub window_x: u32,
+    pub window_y: u32,
+    pub window_width: u32,
+    pub window_height: u32,
+    pub slot_state: u16,
+    pub rsv2: u16,
+    pub client_area_x: u32,
+    pub client_area_y: u32,
+    pub client_area_width: u32,
+    pub client_area_height: u32,
+    pub window_state: u8,
+    pub event_mask: u32,
+    pub keyboard_mode: u8,
+}
+
+pub fn get_proc_info(slot_nr: Option<usize>) -> Option<ProcessInfo> {
+    // let mut proc_info: ProcessInfo = unsafe { core::mem::zeroed() };
+    let mut proc_info = [0_u32; 256];
+
+    let result = unsafe {
+        syscall3(
+            9,
+            proc_info.as_mut_ptr().addr(),
+            slot_nr.map(|x| x as isize).unwrap_or(-1) as _,
+        )
+    };
+
+    if result == usize::MAX {
+        return None;
+    }
+
+    Some(unsafe { proc_info.as_ptr().cast::<ProcessInfo>().read() })
 }
