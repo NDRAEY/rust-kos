@@ -6,6 +6,8 @@ pub use common::*;
 
 pub mod api;
 pub mod console;
+pub mod console_dll;
+pub mod console_shell;
 pub mod dll;
 pub mod error;
 pub mod fs;

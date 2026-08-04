@@ -139,6 +139,10 @@ pub struct ProcessInfo {
     pub keyboard_mode: u8,
 }
 
+const _: &[()] = &[
+    assert!(core::mem::offset_of!(ProcessInfo, pid_tid) == 0x1e),
+];
+
 pub fn get_proc_info(slot_nr: Option<usize>) -> Option<ProcessInfo> {
     // let mut proc_info: ProcessInfo = unsafe { core::mem::zeroed() };
     let mut proc_info = [0_u32; 256];
