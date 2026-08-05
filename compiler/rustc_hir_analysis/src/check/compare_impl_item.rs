@@ -14,17 +14,18 @@ use rustc_infer::infer::{self, BoundRegionConversionTime, InferCtxt, TyCtxtInfer
 use rustc_infer::traits::util;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::{
-    self, BottomUpFolder, GenericArgs, GenericParamDefKind, Generics, RegionExt,
-    RegionUtilitiesExt, Ty, TyCtxt, TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitable,
-    TypeVisitableExt, TypeVisitor, TypingMode, Unnormalized, Upcast,
+    self, BottomUpFolder, GenericArgs, GenericParamDefKind, Generics, RegionExt, Ty, TyCtxt,
+    TypeFoldable, TypeFolder, TypeSuperFoldable, TypeVisitable, TypeVisitableExt, TypeVisitor,
+    TypingMode, Unnormalized, Upcast,
 };
 use rustc_middle::{bug, span_bug};
 use rustc_span::{BytePos, DUMMY_SP, Span};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::regions::InferCtxtRegionExt;
+use rustc_trait_selection::solve::NextSolverError;
 use rustc_trait_selection::traits::{
-    self, FulfillmentError, ObligationCause, ObligationCauseCode, ObligationCtxt,
+    self, FromSolverError, FulfillmentError, ObligationCause, ObligationCauseCode, ObligationCtxt,
 };
 use tracing::{debug, instrument};
 
@@ -802,7 +803,8 @@ struct ImplTraitInTraitCollector<'a, 'tcx, E> {
 
 impl<'a, 'tcx, E> ImplTraitInTraitCollector<'a, 'tcx, E>
 where
-    E: 'tcx,
+    E: FromSolverError<'tcx, NextSolverError<'tcx>>
+        + FromSolverError<'tcx, traits::OldSolverError<'tcx>>,
 {
     fn new(
         ocx: &'a ObligationCtxt<'a, 'tcx, E>,
@@ -816,7 +818,8 @@ where
 
 impl<'tcx, E> TypeFolder<TyCtxt<'tcx>> for ImplTraitInTraitCollector<'_, 'tcx, E>
 where
-    E: 'tcx,
+    E: FromSolverError<'tcx, NextSolverError<'tcx>>
+        + FromSolverError<'tcx, traits::OldSolverError<'tcx>>,
 {
     fn cx(&self) -> TyCtxt<'tcx> {
         self.ocx.infcx.tcx

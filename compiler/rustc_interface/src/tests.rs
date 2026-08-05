@@ -13,11 +13,11 @@ use rustc_session::config::{
     AnnotateMoves, AutoDiff, BranchProtection, CFGuard, Cfg, CodegenRetagOptions, CoverageLevel,
     CoverageOptions, DebugInfo, DumpMonoStatsFormat, ErrorOutputType, ExternEntry, ExternLocation,
     Externs, FmtDebug, FunctionReturn, IncrementalStateAssertion, InliningThreshold, Input,
-    InstrumentCoverage, InstrumentMcount, InstrumentXRay, LinkSelfContained, LinkerPluginLto,
-    LocationDetail, LtoCli, MirIncludeSpans, NextSolverConfig, Offload, Options, OutFileName,
-    OutputType, OutputTypes, PAuthKey, PacRet, Passes, PatchableFunctionEntry, Polonius,
-    ProcMacroExecutionStrategy, Strip, SwitchWithOptPath, SymbolManglingVersion, WasiExecModel,
-    build_configuration, build_session_options, rustc_optgroups,
+    InstrumentCoverage, InstrumentMcount, InstrumentMcountOpts, InstrumentXRay, LinkSelfContained,
+    LinkerPluginLto, LocationDetail, LtoCli, MirIncludeSpans, NextSolverConfig, Offload, Options,
+    OutFileName, OutputType, OutputTypes, PAuthKey, PacRet, Passes, PatchableFunctionEntry,
+    Polonius, ProcMacroExecutionStrategy, Strip, SwitchWithOptPath, SymbolManglingVersion,
+    WasiExecModel, build_configuration, build_session_options, rustc_optgroups,
 };
 use rustc_session::lint::Level;
 use rustc_session::search_paths::SearchPath;
@@ -756,7 +756,7 @@ fn test_unstable_options_tracking_hash() {
     untracked!(span_debug, true);
     untracked!(span_free_formats, true);
     untracked!(temps_dir, Some(String::from("abc")));
-    untracked!(threads, Some(99));
+    untracked!(threads, Some(String::from("99")));
     untracked!(time_llvm_passes, true);
     untracked!(time_passes, true);
     untracked!(time_passes_format, TimePassesFormat::Json);
@@ -834,7 +834,7 @@ fn test_unstable_options_tracking_hash() {
     tracked!(inline_mir, Some(true));
     tracked!(inline_mir_hint_threshold, Some(123));
     tracked!(inline_mir_threshold, Some(123));
-    tracked!(instrument_mcount, InstrumentMcount::Mcount);
+    tracked!(instrument_mcount, InstrumentMcount::Mcount(InstrumentMcountOpts::default()));
     tracked!(instrument_xray, Some(InstrumentXRay::default()));
     tracked!(link_directives, false);
     tracked!(link_only, true);

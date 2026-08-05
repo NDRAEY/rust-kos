@@ -43,8 +43,6 @@
 //!
 //! For more details, see the [rustc-dev-guide](https://rustc-dev-guide.rust-lang.org/query.html).
 
-#![allow(unused_parens)]
-
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1137,7 +1135,7 @@ rustc_queries! {
         desc { "check transmute calls inside `{}`", tcx.def_path_str(key) }
     }
 
-    /// Unsafety-check this `LocalDefId`.
+    /// Type-check offloads calls given a typeck root
     query check_offloads(key: LocalDefId) -> Result<(), ErrorGuaranteed> {
         desc { "check offload calls inside `{}`", tcx.def_path_str(key) }
     }

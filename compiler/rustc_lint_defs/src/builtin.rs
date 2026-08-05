@@ -44,6 +44,7 @@ pub mod hardwired {
             DEPRECATED_WHERE_CLAUSE_LOCATION,
             DUPLICATE_FEATURES,
             DUPLICATE_MACRO_ATTRIBUTES,
+            DUPLICATE_TOOLS,
             ELIDED_LIFETIMES_IN_PATHS,
             EXPLICIT_BUILTIN_CFGS_IN_FLAGS,
             EXPORTED_PRIVATE_DEPENDENCIES,
@@ -69,6 +70,7 @@ pub mod hardwired {
             MACRO_EXPANDED_MACRO_EXPORTS_ACCESSED_BY_ABSOLUTE_PATHS,
             MACRO_USE_EXTERN_CRATE,
             MALFORMED_DIAGNOSTIC_ATTRIBUTES,
+            MALFORMED_DIAGNOSTIC_FILTERS,
             MALFORMED_DIAGNOSTIC_FORMAT_LITERALS,
             META_VARIABLE_MISUSE,
             METHOD_CALL_ON_DIVERGING_INFER_VAR,
@@ -4553,6 +4555,35 @@ declare_lint! {
 }
 
 declare_lint! {
+    /// The `malformed_diagnostic_filters` lint detects malformed filters in diagnostic
+    /// attributes.
+    ///
+    /// ### Example
+    ///
+    // FIXME(bootstrap): Use a regular Rust doc code block after stage 0 emits
+    // `malformed_diagnostic_filters` instead of E0232 for this example.
+    #[cfg_attr(bootstrap, doc = "```rust,ignore (stage 0 emits E0232)")]
+    #[cfg_attr(not(bootstrap), doc = "```rust")]
+    /// #![feature(rustc_attrs)]
+    /// #![allow(internal_features)]
+    ///
+    /// #[rustc_on_unimplemented(on(invalid, message = "unused"))]
+    /// trait Trait {}
+    #[doc = "```"]
+    ///
+    /// {{produces}}
+    ///
+    /// ### Explanation
+    ///
+    /// A `rustc_on_unimplemented` filter must use a supported flag, a name-value predicate,
+    /// or the `all`, `any`, and `not` predicate operators. Invalid filters are ignored.
+    pub MALFORMED_DIAGNOSTIC_FILTERS,
+    Warn,
+    "detects malformed filters in diagnostic attributes",
+    @feature_gate = rustc_attrs;
+}
+
+declare_lint! {
     /// The `ambiguous_glob_imports` lint detects glob imports that should report ambiguity
     /// errors, but previously didn't do that due to rustc bugs.
     ///
@@ -5711,4 +5742,30 @@ declare_lint! {
         reason: fcw!(FutureReleaseError #159228),
         report_in_deps: false,
     };
+}
+
+declare_lint! {
+    /// The `duplicate_tools` lint detects duplicate tools found in crate-level
+    /// [`register_tool` attributes] (including `register_attribute_tool` or `register_lint_tool`).
+    ///
+    /// [`register_tool` attributes]: https://doc.rust-lang.org/nightly/unstable-book/language-features/register-tool.html
+    ///
+    /// ### Example
+    ///
+    /// ```rust,compile_fail
+    /// #![feature(register_tool)]
+    /// #![register_tool(foo)]
+    /// #![register_tool(foo)]
+    /// ```
+    ///
+    /// {{produces}}
+    ///
+    /// ### Explanation
+    ///
+    /// Enabling a tool more than once is a no-op.
+    /// To avoid this warning, remove the second `register_tool()` attribute.
+    pub DUPLICATE_TOOLS,
+    Deny,
+    "duplicate tools found in crate-level `#[register_tools]` directives",
+    @feature_gate = register_tool;
 }

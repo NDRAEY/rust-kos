@@ -410,6 +410,8 @@ impl CommandLineStep for Llvm {
         // equally well everywhere.
         if builder.llvm_link_shared() {
             cfg.define("LLVM_LINK_LLVM_DYLIB", "ON");
+            // Keep the pre-LLVM23 behavior for now.
+            cfg.define("LLVM_VERSIONED_DYLIB_NAME_ON_DARWIN", "OFF");
         }
 
         if (target.starts_with("csky")
@@ -442,6 +444,12 @@ impl CommandLineStep for Llvm {
             // know it's linking as Arm64EC (vs Arm64X).
             ldflags.exe.push(" -machine:arm64ec");
             ldflags.shared.push(" -machine:arm64ec");
+        }
+
+        // cc-rs deprecated `static_flag`, which used to supply `-static` for musl
+        // targets, so pass it here instead.
+        if target.contains("musl") && builder.crt_static(target).unwrap_or(true) {
+            ldflags.exe.push(" -static");
         }
 
         if target.is_msvc() {
@@ -1747,7 +1755,6 @@ impl CommandLineStep for Libunwind {
             cfg.out_dir(&out_dir);
 
             if self.target.contains("x86_64-fortanix-unknown-sgx") {
-                cfg.static_flag(true);
                 cfg.flag("-fno-stack-protector");
                 cfg.flag("-ffreestanding");
                 cfg.flag("-fexceptions");

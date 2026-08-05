@@ -1698,6 +1698,9 @@ impl<'a, 'tcx> EncodeContext<'a, 'tcx> {
 
             for field in &variant.fields {
                 self.tables.safety.set(field.did.index, field.safety);
+                record!(
+                    self.tables.mut_restriction[field.did] <- field.mut_restriction
+                );
             }
 
             if let Some((CtorKind::Fn, ctor_def_id)) = variant.ctor {
@@ -2487,7 +2490,7 @@ pub fn encode_metadata(tcx: TyCtxt<'_>, path: &Path, ref_path: Option<&Path>) {
         return;
     };
 
-    if tcx.sess.threads().is_some() {
+    if tcx.sess.opts.jobs.frontend.is_some() {
         // Prefetch some queries used by metadata encoding.
         // This is not necessary for correctness, but is only done for performance reasons.
         // It can be removed if it turns out to cause trouble or be detrimental to performance.

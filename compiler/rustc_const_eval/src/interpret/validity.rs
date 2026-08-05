@@ -32,7 +32,6 @@ use super::machine::AllocMap;
 use super::{
     AllocId, CheckInAllocMsg, GlobalAlloc, ImmTy, Immediate, InterpCx, InterpResult, MPlaceTy,
     Machine, MemPlaceMeta, PlaceTy, Pointer, Projectable, Scalar, ValueVisitor, err_ub,
-    format_interp_error,
 };
 use crate::enter_trace_span;
 
@@ -565,6 +564,8 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
         ty: Ty<'tcx>,
         ptr_kind: PtrKind,
     ) -> InterpResult<'tcx> {
+        // Note that some of those checks (those that encode the basic validity invariant of
+        // pointers) are duplicated in `place_deref`, so changes here might need updates there.
         let ptr = self.read_immediate(value, ptr_kind.into())?;
         if self.reset_provenance_and_padding {
             // There's no padding in a pointer.
@@ -604,7 +605,7 @@ impl<'rt, 'tcx, M: Machine<'tcx>> ValidityVisitor<'rt, 'tcx, M> {
                 self.ecx.check_ptr_access(
                     place.ptr(),
                     size,
-                    CheckInAllocMsg::Dereferenceable, // will anyway be replaced by validity message
+                    CheckInAllocMsg::Dereferenceable("pointer"), // will anyway be replaced by validity message
                 ),
                 self.path,
                 Ub(DanglingIntPointer { addr: 0, .. }) =>
@@ -1604,7 +1605,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             v.reset_padding(val)?;
             interp_ok(())
         })
-        .map_err_info(|err| {
+        .inspect_err_info(|err| {
             if !matches!(
                 err.kind(),
                 InterpErrorKind::UndefinedBehavior(ValidationError { .. })
@@ -1614,9 +1615,8 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 // during validation.
                 | InterpErrorKind::MachineStop(_)
             ) {
-                bug!("Unexpected error during validation: {}", format_interp_error(err));
+                bug!("Unexpected error during validation: {}", err.to_string());
             }
-            err
         })
     }
 
