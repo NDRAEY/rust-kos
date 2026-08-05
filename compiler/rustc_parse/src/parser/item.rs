@@ -283,7 +283,7 @@ impl<'a> Parser<'a> {
                 contract,
                 body,
                 define_opaque: None,
-                eii_impls: ThinVec::new(),
+                eii_impl: None,
             }))
         } else if self.eat_keyword_case(exp!(Extern), case) {
             if self.eat_keyword_case(exp!(Crate), case) {
@@ -1257,7 +1257,7 @@ impl<'a> Parser<'a> {
                             mutability: _,
                             expr,
                             define_opaque,
-                            eii_impls: _,
+                            eii_impl: _,
                         }) => {
                             self.dcx()
                                 .emit_err(diagnostics::AssociatedStaticItemNotAllowed { span });
@@ -1523,7 +1523,7 @@ impl<'a> Parser<'a> {
                                 expr: body,
                                 safety: Safety::Default,
                                 define_opaque: None,
-                                eii_impls: ThinVec::default(),
+                                eii_impl: None,
                             }))
                         }
                         _ => return self.error_bad_item_kind(span, &kind, "`extern` blocks"),
@@ -1661,15 +1661,8 @@ impl<'a> Parser<'a> {
 
         self.expect_semi()?;
 
-        let item = StaticItem {
-            ident,
-            ty,
-            safety,
-            mutability,
-            expr,
-            define_opaque: None,
-            eii_impls: ThinVec::default(),
-        };
+        let item =
+            StaticItem { ident, ty, safety, mutability, expr, define_opaque: None, eii_impl: None };
         Ok(ItemKind::Static(Box::new(item)))
     }
 
@@ -2383,15 +2376,15 @@ impl<'a> Parser<'a> {
         self.expect_field_ty_separator()?;
         let ty = self.parse_ty()?;
         if self.token == token::Colon && self.look_ahead(1, |&t| t != token::Colon) {
-            self.dcx()
+            return Err(self
+                .dcx()
                 .struct_span_err(self.token.span, "found single colon in a struct field type path")
                 .with_span_suggestion_verbose(
                     self.token.span,
                     "write a path separator here",
                     "::",
                     Applicability::MaybeIncorrect,
-                )
-                .emit();
+                ));
         }
         let default = if self.token == token::Eq {
             self.bump();

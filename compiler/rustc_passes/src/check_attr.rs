@@ -12,7 +12,6 @@ use rustc_abi::ExternAbi;
 use rustc_ast::{AttrStyle, MetaItemKind, ast};
 use rustc_attr_parsing::AttributeParser;
 use rustc_data_structures::thin_vec::ThinVec;
-use rustc_data_structures::unord::UnordMap;
 use rustc_errors::{DiagCtxtHandle, IntoDiagArg, MultiSpan, msg};
 use rustc_feature::BUILTIN_ATTRIBUTE_MAP;
 use rustc_hir::attrs::diagnostic::Directive;
@@ -122,7 +121,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         for attr in attrs {
             match attr {
                 Attribute::Parsed(attr_kind) => {
-                    self.check_one_parsed_attribute(hir_id, span, target, item, attrs, attr_kind);
+                    self.check_one_parsed_attribute(hir_id, span, target, item, attr_kind);
                     self.check_unused_attribute(hir_id, attr, None);
                 }
                 Attribute::Unparsed(attr_item) => {
@@ -173,7 +172,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
         span: Span,
         target: Target,
         item: Option<&'tcx Item<'tcx>>,
-        attrs: &[Attribute],
         attr: &AttributeKind,
     ) {
         match attr {
@@ -190,10 +188,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             AttributeKind::Inline(kind, attr_span) => {
                 self.check_inline(hir_id, *attr_span, kind, target)
             }
-            AttributeKind::AllowInternalUnsafe(attr_span)
-            | AttributeKind::AllowInternalUnstable(.., attr_span) => {
-                self.check_macro_only_attr(*attr_span, span, target, attrs)
-            }
             AttributeKind::RustcAllowConstFnUnstable(_, first_span) => {
                 self.check_rustc_allow_const_fn_unstable(hir_id, *first_span, span, target)
             }
@@ -204,9 +198,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 self.check_dump_object_lifetime_defaults(hir_id);
             }
             AttributeKind::Naked(..) => self.check_naked(hir_id, target),
-            AttributeKind::TrackCaller(attr_span) => {
-                self.check_track_caller(hir_id, *attr_span, attrs, target)
-            }
             AttributeKind::NonExhaustive(attr_span) => {
                 self.check_non_exhaustive(*attr_span, span, target, item)
             }
@@ -219,7 +210,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 self.check_rustc_legacy_const_generics(item, *attr_span, fn_indexes)
             }
             AttributeKind::Doc(attr) => self.check_doc_attrs(attr, hir_id, target),
-            AttributeKind::EiiImpls(impls) => self.check_eii_impl(impls, target),
+            AttributeKind::EiiImpl(eii_impl) => self.check_eii_impl(eii_impl),
             AttributeKind::RustcMustImplementOneOf { attr_span, fn_names } => {
                 self.check_rustc_must_implement_one_of(*attr_span, fn_names, hir_id, target)
             }
@@ -241,6 +232,8 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
 
             // All of the following attributes have no specific checks.
             // tidy-alphabetical-start
+            AttributeKind::AllowInternalUnsafe(..) => (),
+            AttributeKind::AllowInternalUnstable(..) => (),
             AttributeKind::AutomaticallyDerived => (),
             AttributeKind::CfgAttrTrace(..) => (),
             AttributeKind::CfgTrace(..) => (),
@@ -406,6 +399,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             AttributeKind::TargetFeature { .. } => {}
             AttributeKind::TestRunner(..) => (),
             AttributeKind::ThreadLocal => (),
+            AttributeKind::TrackCaller(_) => (),
             AttributeKind::TypeLengthLimit { .. } => (),
             AttributeKind::Unroll(..) => (),
             AttributeKind::UnstableFeatureBound(..) => (),
@@ -464,71 +458,54 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 }
             }
         }
-        // Check for duplicates
-
-        let mut set: UnordMap<Symbol, Span> = Default::default();
-
-        for ident in &*list {
-            if let Some(dup) = set.insert(ident.name, ident.span) {
-                self.tcx.dcx().emit_err(diagnostics::FunctionNamesDuplicated {
-                    spans: vec![dup, ident.span],
-                });
-            }
-        }
     }
 
-    fn check_eii_impl(&self, impls: &[EiiImpl], target: Target) {
-        for EiiImpl { span, inner_span, resolution, impl_unsafe_span, is_default: _ } in impls {
-            match target {
-                Target::Fn | Target::Static => {}
-                _ => {
-                    self.dcx().emit_err(diagnostics::EiiImplTarget { span: *span });
-                }
+    /// Checks that each externally implementable item (EII) implementation uses `unsafe`
+    /// exactly when its declaration requires it.
+    fn check_eii_impl(&self, eii_impl: &EiiImpl) {
+        let EiiImpl { span, inner_span, resolution, impl_unsafe_span, is_default: _ } = eii_impl;
+        let impl_unsafe = match resolution {
+            EiiImplResolution::Macro(eii_macro) => find_attr!(
+                self.tcx,
+                *eii_macro,
+                EiiDeclaration(EiiDecl { impl_unsafe, .. }) => *impl_unsafe
+            ),
+            EiiImplResolution::Known(foreign_item_did) => self
+                .tcx
+                .externally_implementable_items(foreign_item_did.krate)
+                .get(foreign_item_did)
+                .map(|(decl, _)| decl.impl_unsafe),
+            EiiImplResolution::Error(_) => None,
+        };
+        let Some(needs_unsafe) = impl_unsafe else {
+            return;
+        };
+
+        let name = match resolution {
+            EiiImplResolution::Macro(eii_macro) => self.tcx.item_name(*eii_macro),
+            EiiImplResolution::Known(def_id) => self.tcx.item_name(*def_id),
+            EiiImplResolution::Error(_) => unreachable!(),
+        };
+
+        match (needs_unsafe, *impl_unsafe_span) {
+            (true, None) => {
+                self.dcx().emit_err(diagnostics::EiiImplRequiresUnsafe {
+                    span: *span,
+                    name,
+                    suggestion: diagnostics::EiiImplRequiresUnsafeSuggestion {
+                        left: inner_span.shrink_to_lo(),
+                        right: inner_span.shrink_to_hi(),
+                    },
+                });
             }
-
-            let impl_unsafe = match resolution {
-                EiiImplResolution::Macro(eii_macro) => find_attr!(
-                    self.tcx,
-                    *eii_macro,
-                    EiiDeclaration(EiiDecl { impl_unsafe, .. }) => *impl_unsafe
-                ),
-                EiiImplResolution::Known(foreign_item_did) => self
-                    .tcx
-                    .externally_implementable_items(foreign_item_did.krate)
-                    .get(foreign_item_did)
-                    .map(|(decl, _)| decl.impl_unsafe),
-                EiiImplResolution::Error(_) => None,
-            };
-            let Some(needs_unsafe) = impl_unsafe else {
-                continue;
-            };
-
-            let name = match resolution {
-                EiiImplResolution::Macro(eii_macro) => self.tcx.item_name(*eii_macro),
-                EiiImplResolution::Known(def_id) => self.tcx.item_name(*def_id),
-                EiiImplResolution::Error(_) => unreachable!(),
-            };
-
-            match (needs_unsafe, *impl_unsafe_span) {
-                (true, None) => {
-                    self.dcx().emit_err(diagnostics::EiiImplRequiresUnsafe {
-                        span: *span,
-                        name,
-                        suggestion: diagnostics::EiiImplRequiresUnsafeSuggestion {
-                            left: inner_span.shrink_to_lo(),
-                            right: inner_span.shrink_to_hi(),
-                        },
-                    });
-                }
-                (false, Some(unsafe_span)) => {
-                    self.dcx().emit_err(diagnostics::EiiImplCannotBeUnsafe {
-                        impl_span: *span,
-                        unsafe_span,
-                        name,
-                    });
-                }
-                _ => {}
+            (false, Some(unsafe_span)) => {
+                self.dcx().emit_err(diagnostics::EiiImplCannotBeUnsafe {
+                    impl_span: *span,
+                    unsafe_span,
+                    name,
+                });
             }
+            _ => {}
         }
     }
 
@@ -773,34 +750,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 ObjectLifetimeDefault::Ambiguous => "Ambiguous".to_owned(),
             };
             tcx.dcx().span_err(tcx.def_span(param.def_id), repr);
-        }
-    }
-
-    /// Checks if a `#[track_caller]` is applied to a function.
-    fn check_track_caller(
-        &self,
-        hir_id: HirId,
-        attr_span: Span,
-        attrs: &[Attribute],
-        target: Target,
-    ) {
-        match target {
-            Target::Fn => {
-                // `#[track_caller]` is not valid on weak lang items because they are called via
-                // `extern` declarations and `#[track_caller]` would alter their ABI.
-                if let Some(item) = find_attr!(attrs, Lang(item) => item)
-                    && item.is_weak()
-                {
-                    let sig = self.tcx.hir_node(hir_id).fn_sig().unwrap();
-
-                    self.dcx().emit_err(diagnostics::LangItemWithTrackCaller {
-                        attr_span,
-                        name: item.name(),
-                        sig_span: sig.span,
-                    });
-                }
-            }
-            _ => {}
         }
     }
 
@@ -1286,31 +1235,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 hint_spans.collect::<Vec<Span>>(),
                 diagnostics::ReprConflictingLint,
             );
-        }
-    }
-
-    /// Outputs an error for attributes that can only be applied to macros, such as
-    /// `#[allow_internal_unsafe]` and `#[allow_internal_unstable]`.
-    /// (Allows proc_macro functions)
-    // FIXME(jdonszelmann): if possible, move to attr parsing
-    fn check_macro_only_attr(
-        &self,
-        attr_span: Span,
-        span: Span,
-        target: Target,
-        attrs: &[Attribute],
-    ) {
-        match target {
-            Target::Fn => {
-                for attr in attrs {
-                    if attr.is_proc_macro_attr() {
-                        // return on proc macros
-                        return;
-                    }
-                }
-                self.tcx.dcx().emit_err(diagnostics::MacroOnlyAttribute { attr_span, span });
-            }
-            _ => {}
         }
     }
 
