@@ -834,7 +834,7 @@ impl TypeAliasSignature {
         let source = loc.source(db);
         let name = as_name_opt(source.value.name());
         let (store, source_map, generic_params, bounds, ty) =
-            lower_type_alias(db, loc.container.module(db), source, id);
+            lower_type_alias(db, loc.container, source, id);
 
         (
             Arc::new(TypeAliasSignature { store, generic_params, flags, bounds, name, ty }),
@@ -848,14 +848,6 @@ pub struct FunctionBody {
     pub store: ExpressionStore,
     pub parameters: Box<[PatId]>,
 }
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct SimpleBody {
-    pub store: ExpressionStore,
-}
-pub type StaticBody = SimpleBody;
-pub type ConstBody = SimpleBody;
-pub type EnumVariantBody = SimpleBody;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct VariantFieldsBody {
@@ -1152,7 +1144,7 @@ impl EnumVariants {
     }
 }
 
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 pub(crate) fn extern_block_abi(db: &dyn SourceDatabase, extern_block: ExternBlockId) -> ExternAbi {
     let source = extern_block.lookup(db).source(db);
     source

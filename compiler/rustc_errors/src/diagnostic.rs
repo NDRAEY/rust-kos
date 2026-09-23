@@ -1,15 +1,15 @@
 use std::borrow::Cow;
 use std::fmt::{self, Debug};
-use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
+use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use std::panic;
 use std::path::PathBuf;
 use std::thread::panicking;
 
 use rustc_ast::attr::version::RustcVersion;
-use rustc_data_structures::sync::{DynSend, DynSync};
-use rustc_error_messages::{DiagArgMap, DiagArgName, DiagArgValue, IntoDiagArg};
+use rustc_data_structures::stable_hash::StableHasher;
+use rustc_error_messages::{DiagArgMap, DiagArgName, IntoDiagArg};
+use rustc_hashes::Hash128;
 use rustc_lint_defs::{Applicability, LintExpectationId};
 use rustc_macros::{Decodable, Encodable};
 use rustc_span::{DUMMY_SP, Span, Spanned, Symbol};
@@ -17,124 +17,33 @@ use tracing::debug;
 
 use crate::{
     CodeSuggestion, DiagCtxtHandle, DiagMessage, ErrCode, ErrorGuaranteed, ExplicitBug, Level,
-    MultiSpan, StashKey, Style, Substitution, SubstitutionPart, SuggestionStyle, Suggestions,
+    MultiSpan, StashKey, Style, Sublevel, Substitution, SubstitutionPart, SuggestionStyle,
+    Suggestions,
 };
-
-/// Trait for types that `Diag::emit` can return as a "guarantee" (or "proof")
-/// token that the emission happened.
-pub trait EmissionGuarantee: Sized {
-    /// This exists so that bugs and fatal errors can both result in `!` (an
-    /// abort) when emitted, but have different aborting behaviour.
-    type EmitResult = Self;
-
-    /// Implementation of `Diag::emit`, fully controlled by each `impl` of
-    /// `EmissionGuarantee`, to make it impossible to create a value of
-    /// `Self::EmitResult` without actually performing the emission.
-    #[track_caller]
-    fn emit_producing_guarantee(diag: Diag<'_, Self>) -> Self::EmitResult;
-}
-
-impl EmissionGuarantee for ErrorGuaranteed {
-    fn emit_producing_guarantee(diag: Diag<'_, Self>) -> Self::EmitResult {
-        diag.emit_producing_error_guaranteed()
-    }
-}
-
-impl EmissionGuarantee for () {
-    fn emit_producing_guarantee(diag: Diag<'_, Self>) -> Self::EmitResult {
-        diag.emit_producing_nothing();
-    }
-}
-
-/// Marker type which enables implementation of `create_bug` and `emit_bug` functions for
-/// bug diagnostics.
-#[derive(Copy, Clone)]
-pub struct BugAbort;
-
-impl EmissionGuarantee for BugAbort {
-    type EmitResult = !;
-
-    fn emit_producing_guarantee(diag: Diag<'_, Self>) -> Self::EmitResult {
-        diag.emit_producing_nothing();
-        panic::panic_any(ExplicitBug);
-    }
-}
-
-/// Marker type which enables implementation of `create_fatal` and `emit_fatal` functions for
-/// fatal diagnostics.
-#[derive(Copy, Clone)]
-pub struct FatalAbort;
-
-impl EmissionGuarantee for FatalAbort {
-    type EmitResult = !;
-
-    fn emit_producing_guarantee(diag: Diag<'_, Self>) -> Self::EmitResult {
-        diag.emit_producing_nothing();
-        crate::FatalError.raise()
-    }
-}
-
-impl EmissionGuarantee for rustc_span::fatal_error::FatalError {
-    fn emit_producing_guarantee(diag: Diag<'_, Self>) -> Self::EmitResult {
-        diag.emit_producing_nothing();
-        rustc_span::fatal_error::FatalError
-    }
-}
 
 /// Trait implemented by error types. This is rarely implemented manually. Instead, use
 /// `#[derive(Diagnostic)]` -- see [rustc_macros::Diagnostic].
-///
-/// When implemented manually, it should be generic over the emission
-/// guarantee, i.e.:
-/// ```ignore (fragment)
-/// impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for Foo { ... }
-/// ```
-/// rather than being specific:
-/// ```ignore (fragment)
-/// impl<'a> Diagnostic<'a> for Bar { ... }  // the default type param is `ErrorGuaranteed`
-/// impl<'a> Diagnostic<'a, ()> for Baz { ... }
-/// ```
-/// There are two reasons for this.
-/// - A diagnostic like `Foo` *could* be emitted at any level -- `level` is
-///   passed in to `into_diag` from outside. Even if in practice it is
-///   always emitted at a single level, we let the diagnostic creation/emission
-///   site determine the level (by using `create_err`, `emit_warn`, etc.)
-///   rather than the `Diagnostic` impl.
-/// - Derived impls are always generic, and it's good for the hand-written
-///   impls to be consistent with them.
-#[rustc_diagnostic_item = "Diagnostic"]
-pub trait Diagnostic<'a, G: EmissionGuarantee = ErrorGuaranteed> {
+pub trait Diagnostic<'a> {
     /// Write out as a diagnostic out of `DiagCtxt`.
     #[must_use]
     #[track_caller]
-    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G>;
+    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a>;
 }
 
-impl<'a, T, G> Diagnostic<'a, G> for Spanned<T>
+impl<'a, T> Diagnostic<'a> for Spanned<T>
 where
-    T: Diagnostic<'a, G>,
-    G: EmissionGuarantee,
+    T: Diagnostic<'a>,
 {
-    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
+    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a> {
         self.node.into_diag(dcx, level).with_span(self.span)
     }
 }
 
-impl<'a> Diagnostic<'a, ()>
-    for Box<
-        dyn for<'b> FnOnce(DiagCtxtHandle<'b>, Level) -> Diag<'b, ()> + DynSync + DynSend + 'static,
-    >
-{
-    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
-        self(dcx, level)
-    }
-}
-
 /// Type used to emit diagnostic through a closure instead of implementing the `Diagnostic` trait.
-pub struct DiagDecorator<F: FnOnce(&mut Diag<'_, ()>)>(pub F);
+pub struct DiagDecorator<F: FnOnce(&mut Diag<'_>)>(pub F);
 
-impl<'a, F: FnOnce(&mut Diag<'_, ()>)> Diagnostic<'a, ()> for DiagDecorator<F> {
-    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
+impl<'a, F: FnOnce(&mut Diag<'_>)> Diagnostic<'a> for DiagDecorator<F> {
+    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a> {
         let mut diag = Diag::new(dcx, level, "");
         (self.0)(&mut diag);
         diag
@@ -143,10 +52,9 @@ impl<'a, F: FnOnce(&mut Diag<'_, ()>)> Diagnostic<'a, ()> for DiagDecorator<F> {
 
 /// Trait implemented by error types. This should not be implemented manually. Instead, use
 /// `#[derive(Subdiagnostic)]` -- see [rustc_macros::Subdiagnostic].
-#[rustc_diagnostic_item = "Subdiagnostic"]
 pub trait Subdiagnostic {
     /// Add a subdiagnostic to an existing diagnostic.
-    fn add_to_diag<G: EmissionGuarantee>(self, diag: &mut Diag<'_, G>);
+    fn add_to_diag(self, diag: &mut Diag<'_>);
 }
 
 #[derive(Clone, Debug, Encodable, Decodable)]
@@ -157,10 +65,13 @@ pub struct DiagLocation {
 }
 
 impl DiagLocation {
+    pub fn from_location(loc: &'static panic::Location<'static>) -> Self {
+        DiagLocation { file: loc.file().into(), line: loc.line(), col: loc.column() }
+    }
+
     #[track_caller]
     pub fn caller() -> Self {
-        let loc = panic::Location::caller();
-        DiagLocation { file: loc.file().into(), line: loc.line(), col: loc.column() }
+        Self::from_location(panic::Location::caller())
     }
 }
 
@@ -334,9 +245,7 @@ impl DiagInner {
             Level::ForceWarning
             | Level::Warning
             | Level::Note
-            | Level::OnceNote
             | Level::Help
-            | Level::OnceHelp
             | Level::FailureNote
             | Level::Allow
             | Level::Expect => false,
@@ -363,7 +272,12 @@ impl DiagInner {
         }
     }
 
-    pub(crate) fn sub(&mut self, level: Level, message: impl Into<DiagMessage>, span: MultiSpan) {
+    pub(crate) fn sub(
+        &mut self,
+        level: Sublevel,
+        message: impl Into<DiagMessage>,
+        span: MultiSpan,
+    ) {
         let sub = Subdiag { level, messages: vec![(message.into(), Style::NoStyle)], span };
         self.children.push(sub);
     }
@@ -387,52 +301,37 @@ impl DiagInner {
     pub fn emitted_at_sub_diag(&self) -> Subdiag {
         let track = format!("-Ztrack-diagnostics: created at {}", self.emitted_at);
         Subdiag {
-            level: crate::Level::Note,
+            level: crate::Sublevel::Note,
             messages: vec![(DiagMessage::Str(Cow::Owned(track)), Style::NoStyle)],
             span: MultiSpan::new(),
         }
     }
 
-    /// Fields used for Hash, and PartialEq trait.
-    fn keys(
-        &self,
-    ) -> (
-        &Level,
-        &[(DiagMessage, Style)],
-        &Option<ErrCode>,
-        &MultiSpan,
-        &[Subdiag],
-        &Suggestions,
-        Vec<(&DiagArgName, &DiagArgValue)>,
-        &Option<IsLint>,
-    ) {
-        (
-            &self.level,
-            &self.messages,
-            &self.code,
-            &self.span,
-            &self.children,
-            &self.suggestions,
-            self.args.iter().collect(),
-            // omit self.sort_span
-            &self.is_lint,
-            // omit self.emitted_at
-        )
-    }
-}
+    /// Hash used to determine if two diagnostics are the same. Used by
+    /// `DiagCtxtInner::emitted_diagnostics`. Some fields are ignored for the hash.
+    pub(crate) fn dedup_hash(&self) -> Hash128 {
+        // Deconstruct to ensure all fields are considered.
+        let DiagInner {
+            level,
+            messages,
+            code,
+            lint_id: _, // ignore
+            span,
+            children,
+            suggestions,
+            args,
+            sort_span: _, // ignore
+            is_lint,
+            long_ty_path: _, // ignore
+            emitted_at: _,   // ignore
+        } = self;
 
-impl Hash for DiagInner {
-    fn hash<H>(&self, state: &mut H)
-    where
-        H: Hasher,
-    {
-        self.keys().hash(state);
-    }
-}
+        let hashed_parts =
+            (level, messages, code, span, children, suggestions, args.as_slice(), is_lint);
 
-impl PartialEq for DiagInner {
-    fn eq(&self, other: &Self) -> bool {
-        self.keys() == other.keys()
+        let mut hasher = StableHasher::new();
+        hashed_parts.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -440,7 +339,7 @@ impl PartialEq for DiagInner {
 /// For example, a note attached to an error.
 #[derive(Clone, Debug, PartialEq, Hash, Encodable, Decodable)]
 pub struct Subdiag {
-    pub level: Level,
+    pub level: Sublevel,
     pub messages: Vec<(DiagMessage, Style)>,
     pub span: MultiSpan,
 }
@@ -449,16 +348,16 @@ pub struct Subdiag {
 /// Wraps a `DiagInner`, adding some useful things.
 /// - The `dcx` field, allowing it to (a) emit itself, and (b) do a drop check
 ///   that it has been emitted or cancelled.
-/// - The `EmissionGuarantee`, which determines the type returned from `emit`.
 ///
-/// Each constructed `Diag` must be consumed by a function such as `emit`,
-/// `cancel`, `delay_as_bug`, or `into_diag`. A panic occurs if a `Diag`
-/// is dropped without being consumed by one of these functions.
+/// Each constructed `Diag` must be consumed by a function such as
+/// `emit_bug`/`emit_fatal`/`emit_err`/`emit`, `cancel`, or `delay_as_bug`. A
+/// panic occurs if a `Diag` is dropped without being consumed by one of these
+/// functions.
 ///
 /// If there is some state in a downstream crate you would like to access in
 /// the methods of `Diag` here, consider extending `DiagCtxtFlags`.
 #[must_use]
-pub struct Diag<'a, G: EmissionGuarantee = ErrorGuaranteed> {
+pub struct Diag<'a> {
     pub dcx: DiagCtxtHandle<'a>,
 
     /// Why the `Option`? It is always `Some` until the `Diag` is consumed via
@@ -471,17 +370,15 @@ pub struct Diag<'a, G: EmissionGuarantee = ErrorGuaranteed> {
     /// theory, return value optimization (RVO) should avoid unnecessary
     /// copying. In practice, it does not (at the time of writing).
     diag: Option<Box<DiagInner>>,
-
-    _marker: PhantomData<G>,
 }
 
 // Cloning a `Diag` is a recipe for a diagnostic being emitted twice, which
 // would be bad.
-impl<G> !Clone for Diag<'_, G> {}
+impl !Clone for Diag<'_> {}
 
-rustc_data_structures::static_assert_size!(Diag<'_, ()>, 3 * size_of::<usize>());
+rustc_data_structures::static_assert_size!(Diag<'_>, 3 * size_of::<usize>());
 
-impl<G: EmissionGuarantee> Deref for Diag<'_, G> {
+impl Deref for Diag<'_> {
     type Target = DiagInner;
 
     fn deref(&self) -> &DiagInner {
@@ -489,13 +386,13 @@ impl<G: EmissionGuarantee> Deref for Diag<'_, G> {
     }
 }
 
-impl<G: EmissionGuarantee> DerefMut for Diag<'_, G> {
+impl DerefMut for Diag<'_> {
     fn deref_mut(&mut self) -> &mut DiagInner {
         self.diag.as_mut().unwrap()
     }
 }
 
-impl<G: EmissionGuarantee> Debug for Diag<'_, G> {
+impl Debug for Diag<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.diag.fmt(f)
     }
@@ -544,22 +441,22 @@ macro_rules! with_fn {
     };
 }
 
-impl<'a, G: EmissionGuarantee> Diag<'a, G> {
+impl<'a> Diag<'a> {
     #[track_caller]
     pub fn new(dcx: DiagCtxtHandle<'a>, level: Level, message: impl Into<DiagMessage>) -> Self {
         Self::new_diagnostic(dcx, DiagInner::new(level, message))
     }
 
     /// Allow moving diagnostics between different error tainting contexts
-    pub fn with_dcx(mut self, dcx: DiagCtxtHandle<'_>) -> Diag<'_, G> {
-        Diag { dcx, diag: self.diag.take(), _marker: PhantomData }
+    pub fn with_dcx(mut self, dcx: DiagCtxtHandle<'_>) -> Diag<'_> {
+        Diag { dcx, diag: self.diag.take() }
     }
 
     /// Creates a new `Diag` with an already constructed diagnostic.
     #[track_caller]
     pub(crate) fn new_diagnostic(dcx: DiagCtxtHandle<'a>, diag: DiagInner) -> Self {
         debug!("Created new diagnostic");
-        Self { dcx, diag: Some(Box::new(diag)), _marker: PhantomData }
+        Self { dcx, diag: Some(Box::new(diag)) }
     }
 
     /// Delay emission of this diagnostic as a bug.
@@ -582,15 +479,9 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         self.level = Level::DelayedBug;
     }
 
-    /// Make emitting this diagnostic fatal
-    ///
-    /// Changes the level of this diagnostic to Fatal, and importantly also changes the emission guarantee.
-    /// This is sound for errors that would otherwise be printed, but now simply exit the process instead.
-    /// This function still gives an emission guarantee, the guarantee is now just that it exits fatally.
-    /// For delayed bugs this is different, since those are buffered. If we upgrade one to fatal, another
-    /// might now be ignored.
+    /// Make emitting this diagnostic fatal.
     #[track_caller]
-    pub fn upgrade_to_fatal(mut self) -> Diag<'a, FatalAbort> {
+    pub fn upgrade_to_fatal(mut self) -> Diag<'a> {
         assert!(
             matches!(self.level, Level::Error),
             "upgrade_to_fatal: cannot upgrade {:?} to Fatal: not an error",
@@ -601,7 +492,7 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         // Take is okay since we immediately rewrap it in another diagnostic.
         // i.e. we do emit it despite defusing the original diagnostic's drop bomb.
         let diag = self.diag.take();
-        Diag { dcx: self.dcx, diag, _marker: PhantomData }
+        Diag { dcx: self.dcx, diag }
     }
 
     with_fn! { with_span_label,
@@ -619,6 +510,12 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
     /// primary.
     pub fn span_label(&mut self, span: Span, label: impl Into<DiagMessage>) -> &mut Self {
         self.span.push_span_label(span, label.into());
+        self
+    } }
+
+    with_fn! { with_span_context,
+    pub fn span_context(&mut self, span: Span) -> &mut Self {
+        self.span.push_span_context(span);
         self
     } }
 
@@ -721,12 +618,12 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
     with_fn! { with_note,
     /// Add a note attached to this diagnostic.
     pub fn note(&mut self, msg: impl Into<DiagMessage>) -> &mut Self {
-        self.sub(Level::Note, msg, MultiSpan::new());
+        self.sub(Sublevel::Note, msg, MultiSpan::new());
         self
     } }
 
     pub fn highlighted_note(&mut self, msg: Vec<StringPart>) -> &mut Self {
-        self.sub_with_highlights(Level::Note, msg, MultiSpan::new());
+        self.sub_with_highlights(Sublevel::Note, msg, MultiSpan::new());
         self
     }
 
@@ -735,13 +632,13 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         span: impl Into<MultiSpan>,
         msg: Vec<StringPart>,
     ) -> &mut Self {
-        self.sub_with_highlights(Level::Note, msg, span.into());
+        self.sub_with_highlights(Sublevel::Note, msg, span.into());
         self
     }
 
     /// This is like [`Diag::note()`], but it's only printed once.
     pub fn note_once(&mut self, msg: impl Into<DiagMessage>) -> &mut Self {
-        self.sub(Level::OnceNote, msg, MultiSpan::new());
+        self.sub(Sublevel::OnceNote, msg, MultiSpan::new());
         self
     }
 
@@ -753,7 +650,7 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         sp: impl Into<MultiSpan>,
         msg: impl Into<DiagMessage>,
     ) -> &mut Self {
-        self.sub(Level::Note, msg, sp.into());
+        self.sub(Sublevel::Note, msg, sp.into());
         self
     } }
 
@@ -764,14 +661,14 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         sp: S,
         msg: impl Into<DiagMessage>,
     ) -> &mut Self {
-        self.sub(Level::OnceNote, msg, sp.into());
+        self.sub(Sublevel::OnceNote, msg, sp.into());
         self
     }
 
     with_fn! { with_warn,
     /// Add a warning attached to this diagnostic.
     pub fn warn(&mut self, msg: impl Into<DiagMessage>) -> &mut Self {
-        self.sub(Level::Warning, msg, MultiSpan::new());
+        self.sub(Sublevel::Warning, msg, MultiSpan::new());
         self
     } }
 
@@ -782,26 +679,26 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         sp: S,
         msg: impl Into<DiagMessage>,
     ) -> &mut Self {
-        self.sub(Level::Warning, msg, sp.into());
+        self.sub(Sublevel::Warning, msg, sp.into());
         self
     }
 
     with_fn! { with_help,
     /// Add a help message attached to this diagnostic.
     pub fn help(&mut self, msg: impl Into<DiagMessage>) -> &mut Self {
-        self.sub(Level::Help, msg, MultiSpan::new());
+        self.sub(Sublevel::Help, msg, MultiSpan::new());
         self
     } }
 
     /// This is like [`Diag::help()`], but it's only printed once.
     pub fn help_once(&mut self, msg: impl Into<DiagMessage>) -> &mut Self {
-        self.sub(Level::OnceHelp, msg, MultiSpan::new());
+        self.sub(Sublevel::OnceHelp, msg, MultiSpan::new());
         self
     }
 
     /// Add a help message attached to this diagnostic with a customizable highlighted message.
     pub fn highlighted_help(&mut self, msg: Vec<StringPart>) -> &mut Self {
-        self.sub_with_highlights(Level::Help, msg, MultiSpan::new());
+        self.sub_with_highlights(Sublevel::Help, msg, MultiSpan::new());
         self
     }
 
@@ -811,7 +708,7 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         span: impl Into<MultiSpan>,
         msg: Vec<StringPart>,
     ) -> &mut Self {
-        self.sub_with_highlights(Level::Help, msg, span.into());
+        self.sub_with_highlights(Sublevel::Help, msg, span.into());
         self
     }
 
@@ -823,7 +720,7 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         sp: impl Into<MultiSpan>,
         msg: impl Into<DiagMessage>,
     ) -> &mut Self {
-        self.sub(Level::Help, msg, sp.into());
+        self.sub(Sublevel::Help, msg, sp.into());
         self
     } }
 
@@ -1246,13 +1143,13 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
     /// public methods above.
     ///
     /// Used by `proc_macro_server` for implementing `server::Diagnostic`.
-    pub fn sub(&mut self, level: Level, message: impl Into<DiagMessage>, span: MultiSpan) {
+    pub fn sub(&mut self, level: Sublevel, message: impl Into<DiagMessage>, span: MultiSpan) {
         self.deref_mut().sub(level, message, span);
     }
 
     /// Convenience function for internal use, clients should use one of the
     /// public methods above.
-    fn sub_with_highlights(&mut self, level: Level, messages: Vec<StringPart>, span: MultiSpan) {
+    fn sub_with_highlights(&mut self, level: Sublevel, messages: Vec<StringPart>, span: MultiSpan) {
         let messages = messages.into_iter().map(|m| (m.content.into(), m.style)).collect();
         let sub = Subdiag { level, messages, span };
         self.children.push(sub);
@@ -1298,21 +1195,45 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         self
     }
 
-    /// Most `emit_producing_guarantee` functions use this as a starting point.
-    fn emit_producing_nothing(mut self) {
+    /// Emit the diagnostic. Will also abort appropriately if the level is `Bug` or `Fatal`.
+    #[track_caller]
+    pub fn emit(mut self) {
+        let level = self.level; // get level before taking the inner diag
         let diag = self.take_diag();
         self.dcx.emit_diagnostic(diag);
+
+        match level {
+            Level::Bug => panic::panic_any(ExplicitBug),
+            Level::Fatal => crate::FatalError.raise(),
+            _ => {}
+        }
     }
 
-    /// `ErrorGuaranteed::emit_producing_guarantee` uses this.
-    fn emit_producing_error_guaranteed(mut self) -> ErrorGuaranteed {
+    /// Use this on a `Bug` diagnostic if you need the `!` return type. Otherwise `emit` suffices.
+    /// Aborts if used on a non-`Bug` diagnostic.
+    #[track_caller]
+    pub fn emit_bug(self) -> ! {
+        assert_eq!(self.level, Level::Bug);
+        self.emit();
+        unreachable!(); // `emit` will have aborted
+    }
+
+    /// Use this on a `Fatal` diagnostic if you need the `!` return type. Otherwise `emit`
+    /// suffices. Aborts if used on a non-`Fatal` diagnostic.
+    #[track_caller]
+    pub fn emit_fatal(self) -> ! {
+        assert_eq!(self.level, Level::Fatal);
+        self.emit();
+        unreachable!(); // `emit` will have aborted
+    }
+
+    /// Use this on an `Error`/`DelayedBug` diagnostic if you need the `ErrorGuaranteed` return
+    /// type. Otherwise `emit` suffices. Aborts if used on a non-`Error`/`DelayedBug` diagnostic.
+    #[track_caller]
+    pub fn emit_err(mut self) -> ErrorGuaranteed {
         let diag = self.take_diag();
 
-        // The only error levels that produce `ErrorGuaranteed` are
-        // `Error` and `DelayedBug`. But `DelayedBug` should never occur here
-        // because delayed bugs have their level changed to `Bug` when they are
-        // actually printed, so they produce an ICE.
-        //
+        // The only error levels that should reach here are `Error` and `DelayedBug`.
         // (Also, even though `level` isn't `pub`, the whole `DiagInner` could
         // be overwritten with a new one thanks to `DerefMut`. So this assert
         // protects against that, too.)
@@ -1326,22 +1247,16 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         guar.unwrap()
     }
 
-    /// Emit and consume the diagnostic.
-    #[track_caller]
-    pub fn emit(self) -> G::EmitResult {
-        G::emit_producing_guarantee(self)
-    }
-
     /// Emit the diagnostic unless `delay` is true,
     /// in which case the emission will be delayed as a bug.
     ///
     /// See `emit` and `delay_as_bug` for details.
     #[track_caller]
-    pub fn emit_unless_delay(mut self, delay: bool) -> G::EmitResult {
+    pub fn emit_err_unless_delay(mut self, delay: bool) -> ErrorGuaranteed {
         if delay {
             self.downgrade_to_delayed_bug();
         }
-        self.emit()
+        self.emit_err()
     }
 
     /// Cancel and consume the diagnostic. (A diagnostic must either be emitted or
@@ -1358,7 +1273,7 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
         s
     }
 
-    /// See `DiagCtxt::stash_diagnostic` for details.
+    /// See `DiagCtxtHandle::stash_diagnostic` for details.
     pub fn stash(mut self, span: Span, key: StashKey) -> Option<ErrorGuaranteed> {
         let diag = self.take_diag();
         self.dcx.stash_diagnostic(span, key, diag)
@@ -1375,15 +1290,15 @@ impl<'a, G: EmissionGuarantee> Diag<'a, G> {
     /// In the meantime, though, callsites are required to deal with the "bug"
     /// locally in whichever way makes the most sense.
     #[track_caller]
-    pub fn delay_as_bug(mut self) -> G::EmitResult {
+    pub fn delay_as_bug(mut self) -> ErrorGuaranteed {
         self.downgrade_to_delayed_bug();
-        self.emit()
+        self.emit_err()
     }
 }
 
 /// Destructor bomb: every `Diag` must be consumed (emitted, cancelled, etc.)
 /// or we emit a bug.
-impl<G: EmissionGuarantee> Drop for Diag<'_, G> {
+impl Drop for Diag<'_> {
     fn drop(&mut self) {
         match self.diag.take() {
             Some(diag) if !panicking() => {

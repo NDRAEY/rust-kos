@@ -81,7 +81,7 @@ use rustc_type_ir::{
     BoundVarIndexKind, TypeSuperVisitable, TypeVisitableExt,
     inherent::{IntoKind, Ty as _},
 };
-use salsa::Update;
+use salsa::SalsaValue;
 use stdx::impl_from;
 use syntax::ast::{ConstArg, make};
 use traits::FnTrait;
@@ -106,9 +106,8 @@ use crate::{
 pub use autoderef::autoderef;
 pub use infer::{
     Adjust, Adjustment, AutoBorrow, BindingMode, ByRef, ExplicitDropMethodUseKind,
-    InferenceDiagnostic, InferenceResult, InferenceTyDiagnosticSource, OverloadedDeref,
-    PointerCast, ReturnKind, cast::CastError, could_coerce, could_unify, could_unify_deeply,
-    infer_query_with_inspect,
+    InferenceDiagnostic, InferenceResult, OverloadedDeref, PointerCast, ReturnKind,
+    cast::CastError, could_coerce, could_unify, could_unify_deeply, infer_query_with_inspect,
 };
 pub use lower::{
     FieldType, GenericDefaults, GenericDefaultsRef, GenericPredicates, LifetimeElisionKind,
@@ -554,7 +553,9 @@ impl Span {
 }
 
 /// A [`DefWithBodyId`], or an anon const.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, salsa::Supertype, Update)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, salsa::Supertype, SalsaValue,
+)]
 pub enum InferBodyId<'db> {
     DefWithBodyId(DefWithBodyId),
     AnonConstId(AnonConstId<'db>),

@@ -21,29 +21,27 @@ use rustc_data_structures::memmap::Mmap;
 use rustc_data_structures::temp_dir::MaybeTempDir;
 use rustc_errors::DiagCtxtHandle;
 use rustc_fs_util::{TempDirBuilder, fix_windows_verbatim_for_gcc, try_canonicalize};
-use rustc_hir::attrs::NativeLibKind;
 use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
-use rustc_lint_defs::builtin::LINKER_INFO;
+use rustc_lint_defs::builtin::{LINKER_INFO, LINKER_MESSAGES};
 use rustc_macros::Diagnostic;
 use rustc_metadata::EncodedMetadata;
 use rustc_metadata::fs::{METADATA_FILENAME, copy_to_stdout, emit_wrapper_file};
-use rustc_middle::bug;
-use rustc_middle::error::DuplicateEiiImpls;
+use rustc_middle::diagnostics::DuplicateEiiImpls;
 use rustc_middle::lint::emit_lint_base;
 use rustc_middle::middle::debugger_visualizer::DebuggerVisualizerFile;
 use rustc_middle::middle::dependency_format::Linkage;
 use rustc_middle::middle::exported_symbols::SymbolExportKind;
 use rustc_session::config::{
-    self, CFGuard, CrateType, DebugInfo, InstrumentMcount, LinkerFeaturesCli, LinkerJobs,
-    OutFileName, OutputFilenames, OutputType, PrintKind, SplitDwarfKind, Strip,
+    self, CFGuard, DebugInfo, InstrumentMcount, LinkerFeaturesCli, LinkerJobs, OutFileName,
+    OutputFilenames, OutputType, PrintKind, SplitDwarfKind, Strip,
 };
-use rustc_session::lint::builtin::LINKER_MESSAGES;
 use rustc_session::output::{check_file_is_writeable, invalid_output_for_target, out_filename};
 use rustc_session::search_paths::PathKind;
 /// For all the linkers we support, and information they might
 /// need out of the shared crate context before we get rid of it.
 use rustc_session::{Session, filesearch};
-use rustc_span::Symbol;
+use rustc_span::{Symbol, bug};
+use rustc_structures::{CrateType, NativeLibKind};
 use rustc_target::spec::crt_objects::CrtObjects;
 use rustc_target::spec::{
     Arch, BinaryFormat, Cc, CfgAbi, Env, LinkOutputKind, LinkSelfContainedComponents,
@@ -836,24 +834,33 @@ fn link_staticlib(
     let hide = sess.opts.unstable_opts.staticlib_hide_internal_symbols;
     let rename = sess.opts.unstable_opts.staticlib_rename_internal_symbols;
 
+    let hide_supported =
+        matches!(sess.target.binary_format, BinaryFormat::Elf | BinaryFormat::MachO);
+    // Rename only rewrites symbol names, so it also works on COFF; hide
+    // needs a visibility concept COFF lacks.
+    let rename_supported = matches!(
+        sess.target.binary_format,
+        BinaryFormat::Elf | BinaryFormat::MachO | BinaryFormat::Coff
+    );
+
     let exported_symbols = if hide || rename {
-        if !matches!(sess.target.binary_format, BinaryFormat::Elf | BinaryFormat::MachO) {
-            if hide {
-                sess.dcx().emit_warn(diagnostics::StaticlibHideInternalSymbolsUnsupported {
-                    binary_format: sess.target.archive_format.to_string(),
-                });
-            }
-            if rename {
-                sess.dcx().emit_warn(diagnostics::StaticlibRenameInternalSymbolsUnsupported {
-                    binary_format: sess.target.archive_format.to_string(),
-                });
-            }
-            None
-        } else {
+        if hide && !hide_supported {
+            sess.dcx().emit_warn(diagnostics::StaticlibHideInternalSymbolsUnsupported {
+                binary_format: sess.target.archive_format.to_string(),
+            });
+        }
+        if rename && !rename_supported {
+            sess.dcx().emit_warn(diagnostics::StaticlibRenameInternalSymbolsUnsupported {
+                binary_format: sess.target.archive_format.to_string(),
+            });
+        }
+        if (hide && hide_supported) || (rename && rename_supported) {
             crate_info
                 .exported_symbols
                 .get(&CrateType::StaticLib)
                 .map(|symbols| symbols.iter().map(|symbol| symbol.name.clone()).collect())
+        } else {
+            None
         }
     } else {
         None
@@ -861,8 +868,11 @@ fn link_staticlib(
 
     let symbols = exported_symbols.map(|exported| ArchiveSymbols {
         exported,
-        rename_suffix: rename.then(|| crate_info.symbol_rename_suffix.clone()),
-        hide,
+        rename_suffix: (rename && rename_supported)
+            .then(|| crate_info.symbol_rename_suffix.clone()),
+        // A warning was already emitted above if hiding was requested for an
+        // unsupported format; don't also ask the backend to hide there.
+        hide: hide && hide_supported,
     });
 
     ab.build(out_filename, symbols);
@@ -1073,27 +1083,43 @@ fn report_linker_output(
         escape_string(output.trim().as_bytes())
     }
 
+    fn has_lnk_code(line: &str) -> bool {
+        // link.exe diagnostics are structured as `LINK : warning LNK####:` or
+        // `LINK : fatal error LNK####:`. The code is always followed by a `:`
+        // that is the second colon in the line, so matching that structure
+        // instead of scanning for `LNK####` anywhere avoids false positives on
+        // file names.
+        let Some((code_colon, _)) = line.match_indices(':').nth(1) else {
+            return false;
+        };
+        let Some(code) = code_colon.checked_sub(7) else {
+            return false;
+        };
+        let code = &line.as_bytes()[code..code_colon];
+        code.starts_with(b"LNK") && code[3..].iter().all(u8::is_ascii_digit)
+    }
+
     if is_msvc_link_exe(sess) {
         info!("inferred MSVC link.exe");
 
         escaped_stdout = for_each(&stdout, |line, output| {
-            // Hide some progress messages from link.exe that we don't care about.
-            // See https://github.com/chromium/chromium/blob/bfa41e41145ffc85f041384280caf2949bb7bd72/build/toolchain/win/tool_wrapper.py#L144-L146
-            // When incremental linking is enabled and an .ilk exists, but its associated .exe is
-            // missing, link.exe prints the path of the missing .exe followed by:
+            // Hide progress messages from link.exe that we don't care about.
+            // These include localized variants of the English messages (e.g.
+            // "Creating library ..."), which rustc cannot recognize by text
+            // without the English language pack.
+            // See https://github.com/rust-lang/rust/issues/159133
+            // When incremental linking is enabled and an .ilk exists, but its
+            // associated .exe is missing, link.exe prints the path of the
+            // missing .exe followed by:
             let ilk_but_no_exe =
                 "not found or not built by the last incremental link; performing full link";
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("Creating library")
-                || trimmed.starts_with("Generating code")
-                || trimmed.starts_with("Finished generating code")
-                || trimmed.ends_with(ilk_but_no_exe)
-            {
-                linker_info += line;
-                linker_info += "\r\n";
-            } else {
+            // LNK6004 is the one code-bearing line that is still informational.
+            if has_lnk_code(line) && !line.ends_with(ilk_but_no_exe) {
                 *output += line;
                 *output += "\r\n"
+            } else {
+                linker_info += line;
+                linker_info += "\r\n";
             }
         });
     } else if is_macos_linker(sess) {
@@ -3070,6 +3096,14 @@ fn linker_with_args(
         link_output_kind,
     );
 
+    if sess.opts.unstable_opts.offload.iter().any(|o| matches!(o, config::Offload::Host(_))) {
+        cmd.link_dylib_by_name("omptarget", false, true);
+        cmd.link_dylib_by_name("omp", false, true);
+        cmd.link_args(["-z", "nostart-stop-gc"]);
+        cmd.link_arg("-rpath");
+        cmd.link_arg(std::path::absolute(&*sess.target_tlib_path.dir).unwrap());
+    }
+
     // Upstream rust crates and their non-dynamic native libraries.
     add_upstream_rust_crates(
         cmd,
@@ -4170,7 +4204,7 @@ fn add_lld_args(
     // `lld` as the linker.
     //
     // Note that wasm targets skip this step since the only option there anyway
-    // is to use LLD but the `wasm32-wasip2` target relies on a wrapper around
+    // is to use LLD but component-producing targets rely on a wrapper around
     // this, `wasm-component-ld`, which is overridden if this option is passed.
     if !sess.target.is_like_wasm {
         cmd.cc_arg("-fuse-ld=lld");

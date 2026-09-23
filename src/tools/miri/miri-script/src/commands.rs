@@ -55,7 +55,7 @@ impl MiriEnv {
             .cargo_cmd("cargo-miri", "run", &[])
             .arg("--quiet")
             .arg("--")
-            .args(&["miri", "setup", "--print-sysroot"])
+            .args(["miri", "setup", "--print-sysroot"])
             .args(target_flag);
         if quiet {
             cmd = cmd.arg("--quiet");
@@ -158,10 +158,15 @@ impl Command {
 
         cmd!(sh, "rustup-toolchain-install-master -n miri -c cargo -c rust-src -c rustc-dev -c llvm-tools -c rustfmt -c clippy {flags...} -- {new_commit}")
             .run()
-            .context("Failed to run rustup-toolchain-install-master. If it is not installed, run 'cargo install rustup-toolchain-install-master'.")?;
+            .context("Failed to run rustup-toolchain-install-master. If it is not installed, run 'cargo install --locked rustup-toolchain-install-master'.")?;
         cmd!(sh, "rustup override set miri").run()?;
         // Cleanup.
         cmd!(sh, "cargo clean").run()?;
+        // Call `cargo metadata` on the sources in case that changes the lockfile
+        // (works around <https://github.com/rust-lang/rust-analyzer/issues/23392>).
+        let sysroot = cmd!(sh, "rustc --print sysroot").read()?;
+        let sysroot = sysroot.trim();
+        cmd!(sh, "cargo metadata --format-version 1 --manifest-path {sysroot}/lib/rustlib/rustc-src/rust/compiler/rustc/Cargo.toml").ignore_stdout().run()?;
         Ok(())
     }
 
@@ -511,7 +516,7 @@ impl Command {
             // We invoke the test suite as that has all the logic for running with dependencies.
             let mut cmd = e
                 .cargo_cmd(".", "test", &features)
-                .args(&["--test", "ui"])
+                .args(["--test", "ui"])
                 // This does not show anything useful so we always hide it.
                 .arg("--quiet")
                 .arg("--")

@@ -14,7 +14,7 @@ use rustc_hir::{Node, find_attr};
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::TyCtxt;
 use rustc_span::Span;
-use rustc_span::def_id::{CRATE_DEF_ID, LOCAL_CRATE};
+use rustc_span::def_id::{CRATE_DEF_ID, LOCAL_CRATE, LocalModId};
 use rustc_span::symbol::{Symbol, kw};
 use tracing::debug;
 
@@ -582,6 +582,7 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                     self.add_impl_to_current_mod(item, impl_);
                 }
             }
+            hir::ItemKind::TestBinderConstraints { .. } => {}
         }
     }
 
@@ -641,7 +642,7 @@ impl<'tcx> Visitor<'tcx> for RustdocVisitor<'_, 'tcx> {
         self.is_importable_from_parent = prev;
     }
 
-    fn visit_mod(&mut self, _: &hir::Mod<'tcx>, _: Span, _: hir::HirId) {
+    fn visit_mod(&mut self, _: &hir::Mod<'tcx>, _: Span, _: LocalModId) {
         // Handled in `visit_item_inner`
     }
 

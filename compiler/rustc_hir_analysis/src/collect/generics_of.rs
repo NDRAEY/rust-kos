@@ -4,12 +4,11 @@ use std::ops::ControlFlow;
 use rustc_errors::{Diag, DiagCtxtHandle, Diagnostic, Level};
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalDefId;
-use rustc_hir::intravisit::{self, Visitor, VisitorExt};
+use rustc_hir::intravisit::{self, Visitor};
 use rustc_hir::{self as hir, AmbigArg, GenericParamKind, HirId, Node};
-use rustc_middle::span_bug;
+use rustc_lint_defs::builtin::INVALID_TYPE_PARAM_DEFAULT;
 use rustc_middle::ty::{self, TyCtxt};
-use rustc_session::lint;
-use rustc_span::{Span, kw, sym};
+use rustc_span::{Span, kw, span_bug, sym};
 use tracing::{debug, instrument};
 
 use crate::middle::resolve_bound_vars as rbv;
@@ -22,8 +21,8 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
         msg: &'static str,
     }
 
-    impl<'a> Diagnostic<'a, ()> for GenericParametersForbiddenHere {
-        fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, ()> {
+    impl<'a> Diagnostic<'a> for GenericParametersForbiddenHere {
+        fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a> {
             let Self { msg } = self;
             Diag::new(dcx, level, msg)
         }
@@ -219,7 +218,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
             "synthetic HIR should have its `generics_of` explicitly fed"
         ),
 
-        Node::ConstArg(..) => {
+        Node::ConstArg(..) | Node::Infer(hir::InferArg { kind: hir::InferArgKind::Const, .. }) => {
             // These can show up in mGCA when representing "direct" const arguments. The
             // DefCollector cannot know whether an anon const will be represented by an actual HIR
             // Node::AnonConst, or whether it will be represented directly, so it must generate a
@@ -297,7 +296,7 @@ pub(super) fn generics_of(tcx: TyCtxt<'_>, def_id: LocalDefId) -> ty::Generics {
                         ParamDefaultPolicy::Allowed => {}
                         ParamDefaultPolicy::FutureCompatForbidden => {
                             tcx.emit_node_span_lint(
-                                lint::builtin::INVALID_TYPE_PARAM_DEFAULT,
+                                INVALID_TYPE_PARAM_DEFAULT,
                                 param.hir_id,
                                 param.span,
                                 GenericParametersForbiddenHere { msg: MESSAGE },

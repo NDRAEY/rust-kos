@@ -10,15 +10,16 @@
 //!   build target, which is is stored in the main `Config` structure.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 
+use crate::core::backend::CodegenBackendKind;
+use crate::core::config::macros::define_config;
 use crate::core::config::{
-    Allocator, CompilerBuiltins, CompressDebuginfo, LlvmLibunwind, Merge, ReplaceOpt,
-    SplitDebuginfo, StringOrBool,
+    Allocator, CompilerBuiltins, CompressDebuginfo, LlvmLibunwind, SplitDebuginfo, StringOrBool,
 };
-use crate::{CodegenBackendKind, HashSet, PathBuf, define_config, exit};
 
 define_config! {
     /// TOML representation of how each build target is configured.
@@ -129,9 +130,20 @@ impl<'de> Deserialize<'de> for DefaultLinuxLinkerOverride {
 
 /// Set of linker overrides for selected Linux targets.
 #[cfg(not(test))]
-pub fn default_linux_linker_overrides() -> HashMap<String, DefaultLinuxLinkerOverride> {
-    [("x86_64-unknown-linux-gnu".to_string(), DefaultLinuxLinkerOverride::SelfContainedLldCc)]
-        .into()
+pub fn default_linux_linker_overrides(
+    channel: &str,
+) -> HashMap<String, DefaultLinuxLinkerOverride> {
+    let mut overrides = HashMap::from([(
+        "x86_64-unknown-linux-gnu".to_string(),
+        DefaultLinuxLinkerOverride::SelfContainedLldCc,
+    )]);
+    if channel == "nightly" || channel == "dev" {
+        overrides.insert(
+            "loongarch64-unknown-linux-gnu".to_string(),
+            DefaultLinuxLinkerOverride::SelfContainedLldCc,
+        );
+    }
+    overrides
 }
 
 #[cfg(test)]
@@ -140,7 +152,9 @@ thread_local! {
 }
 
 #[cfg(test)]
-pub fn default_linux_linker_overrides() -> HashMap<String, DefaultLinuxLinkerOverride> {
+pub fn default_linux_linker_overrides(
+    _channel: &str,
+) -> HashMap<String, DefaultLinuxLinkerOverride> {
     TEST_LINUX_LINKER_OVERRIDES.with(|cell| cell.borrow().clone()).unwrap_or_default()
 }
 

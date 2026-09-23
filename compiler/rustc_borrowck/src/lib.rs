@@ -2,11 +2,11 @@
 
 // tidy-alphabetical-start
 #![allow(internal_features)]
+#![cfg_attr(bootstrap, feature(never_type))]
 #![feature(default_field_values)]
 #![feature(deref_patterns)]
 #![feature(file_buffered)]
 #![feature(negative_impls)]
-#![feature(never_type)]
 #![feature(option_into_flat_iter)]
 #![feature(rustc_attrs)]
 #![feature(stmt_expr_attributes)]
@@ -35,20 +35,19 @@ use rustc_infer::infer::outlives::env::RegionBoundPairs;
 use rustc_infer::infer::{
     InferCtxt, NllRegionVariableOrigin, RegionVariableOrigin, TyCtxtInferExt,
 };
+use rustc_lint_defs::builtin::{TAIL_EXPR_DROP_ORDER, UNUSED_MUT};
 use rustc_middle::mir::*;
 use rustc_middle::query::Providers;
 use rustc_middle::ty::{
     self, ParamEnv, RegionVid, Ty, TyCtxt, TypeFoldable, TypeVisitable, TypingMode, fold_regions,
 };
-use rustc_middle::{bug, span_bug};
 use rustc_mir_dataflow::impls::{EverInitializedPlaces, MaybeUninitializedPlaces};
 use rustc_mir_dataflow::move_paths::{
     InitIndex, InitLocation, LookupResult, MoveData, MovePathIndex,
 };
 use rustc_mir_dataflow::points::DenseLocationMap;
 use rustc_mir_dataflow::{Analysis, EntryStates, Results, ResultsVisitor, visit_results};
-use rustc_session::lint::builtin::{TAIL_EXPR_DROP_ORDER, UNUSED_MUT};
-use rustc_span::{ErrorGuaranteed, Span, Symbol};
+use rustc_span::{ErrorGuaranteed, Span, Symbol, bug, span_bug};
 use rustc_trait_selection::traits::query::type_op::{QueryTypeOp, TypeOp, TypeOpOutput};
 use smallvec::SmallVec;
 use tracing::{debug, instrument};
@@ -59,6 +58,7 @@ use crate::dataflow::{BorrowIndex, Borrowck, BorrowckDomain, Borrows};
 use crate::diagnostics::{
     AccessKind, BorrowckDiagnosticsBuffer, IllegalMoveOriginKind, MoveError, RegionName,
 };
+use crate::implied_bounds::mir_borrowck_implied_outlives_bounds;
 use crate::path_utils::*;
 use crate::place_ext::PlaceExt;
 use crate::places_conflict::{PlaceConflictBias, places_conflict};
@@ -81,6 +81,7 @@ mod dataflow;
 mod def_use;
 mod diagnostics;
 mod handle_placeholders;
+mod implied_bounds;
 mod nll;
 mod path_utils;
 mod place_ext;
@@ -106,7 +107,7 @@ impl<'tcx> TyCtxtConsts<'tcx> {
 }
 
 pub fn provide(providers: &mut Providers) {
-    *providers = Providers { mir_borrowck, ..*providers };
+    *providers = Providers { mir_borrowck, mir_borrowck_implied_outlives_bounds, ..*providers };
 }
 
 /// Provider for `query mir_borrowck`. Unlike `typeck`, this must
@@ -304,12 +305,12 @@ struct CollectRegionConstraintsResult<'tcx> {
     location_map: Rc<DenseLocationMap>,
     universal_region_relations: Frozen<UniversalRegionRelations<'tcx>>,
     region_bound_pairs: Frozen<RegionBoundPairs<'tcx>>,
-    known_type_outlives_obligations: Frozen<Vec<ty::PolyTypeOutlivesPredicate<'tcx>>>,
+    known_type_outlives_obligations: Frozen<Vec<ty::PolyTypeOutlivesClause<'tcx>>>,
     constraints: MirTypeckRegionConstraints<'tcx>,
     deferred_closure_requirements: DeferredClosureRequirements<'tcx>,
     deferred_opaque_type_errors: Vec<DeferredOpaqueTypeError<'tcx>>,
     polonius_facts: Option<AllFacts<RustcFacts>>,
-    polonius_context: Option<PoloniusContext>,
+    polonius_context: Option<PoloniusContext<'tcx>>,
 }
 
 /// Start borrow checking by collecting the region constraints for
@@ -360,7 +361,6 @@ fn borrowck_collect_region_constraints<'tcx>(
         deferred_closure_requirements,
         polonius_context,
     } = type_check::type_check(
-        root_cx,
         &infcx,
         body,
         &promoted,
@@ -612,21 +612,26 @@ fn get_flow_results<'a, 'tcx>(
 ) -> Results<'tcx, Borrowck<'a, 'tcx>> {
     // We compute these three analyses individually, but them combine them into
     // a single results so that `mbcx` can visit them all together.
-    let borrows = Borrows::new(tcx, body, regioncx, borrow_set).iterate_to_fixpoint(
-        tcx,
-        body,
-        Some("borrowck"),
-    );
-    let uninits = MaybeUninitializedPlaces::new(tcx, body, move_data).iterate_to_fixpoint(
-        tcx,
-        body,
-        Some("borrowck"),
-    );
-    let ever_inits = EverInitializedPlaces::new(body, move_data).iterate_to_fixpoint(
-        tcx,
-        body,
-        Some("borrowck"),
-    );
+    let borrows = {
+        let _timer = tcx.prof.generic_activity("borrowck_dataflow_borrows");
+        Borrows::new(tcx, body, regioncx, borrow_set).iterate_to_fixpoint(
+            tcx,
+            body,
+            Some("borrowck"),
+        )
+    };
+    let uninits = {
+        let _timer = tcx.prof.generic_activity("borrowck_dataflow_maybe_uninits");
+        MaybeUninitializedPlaces::new(tcx, body, move_data).iterate_to_fixpoint(
+            tcx,
+            body,
+            Some("borrowck"),
+        )
+    };
+    let ever_inits = {
+        let _timer = tcx.prof.generic_activity("borrowck_dataflow_ever_inits");
+        EverInitializedPlaces::new(body, move_data).iterate_to_fixpoint(tcx, body, Some("borrowck"))
+    };
 
     let analysis = Borrowck {
         borrows: borrows.analysis,
@@ -792,7 +797,7 @@ pub(crate) struct MirBorrowckCtxt<'a, 'diag, 'tcx> {
     /// Results of Polonius analysis.
     polonius_output: Option<&'a PoloniusOutput>,
     /// When using `-Zpolonius=next`: the data used to compute errors and diagnostics.
-    polonius_context: Option<&'a PoloniusContext>,
+    polonius_context: Option<&'a PoloniusContext<'tcx>>,
 }
 
 // Check that:
@@ -803,7 +808,6 @@ pub(crate) struct MirBorrowckCtxt<'a, 'diag, 'tcx> {
 impl<'a, 'tcx> ResultsVisitor<'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<'a, '_, 'tcx> {
     fn visit_after_early_statement_effect(
         &mut self,
-        _analysis: &Borrowck<'a, 'tcx>,
         state: &BorrowckDomain,
         stmt: &Statement<'tcx>,
         location: Location,
@@ -878,7 +882,6 @@ impl<'a, 'tcx> ResultsVisitor<'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<'a, 
 
     fn visit_after_early_terminator_effect(
         &mut self,
-        _analysis: &Borrowck<'a, 'tcx>,
         state: &BorrowckDomain,
         term: &Terminator<'tcx>,
         loc: Location,
@@ -991,7 +994,6 @@ impl<'a, 'tcx> ResultsVisitor<'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<'a, 
 
     fn visit_after_primary_terminator_effect(
         &mut self,
-        _analysis: &Borrowck<'a, 'tcx>,
         state: &BorrowckDomain,
         term: &Terminator<'tcx>,
         loc: Location,
@@ -2020,7 +2022,8 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                 // So it's safe to skip these.
                 ProjectionElem::OpaqueCast(_)
                 | ProjectionElem::Downcast(_, _)
-                | ProjectionElem::UnwrapUnsafeBinder(_) => (),
+                | ProjectionElem::UnwrapUnsafeBinder(_)
+                | ProjectionElem::PhantomDeref => (),
             }
 
             place_ty = place_ty.projection_ty(tcx, elem);
@@ -2268,6 +2271,10 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                     // (base initialized; no need to
                     // recur further)
                     break;
+                }
+
+                ProjectionElem::PhantomDeref => {
+                    panic!("we don't allow assignments to PhantomDeref, location {location:?}");
                 }
 
                 ProjectionElem::Subslice { .. } => {
@@ -2639,6 +2646,9 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                             // Deref should only be for reference, pointers or boxes
                             _ => bug!("Deref of unexpected type: {:?}", base_ty),
                         }
+                    }
+                    ProjectionElem::PhantomDeref => {
+                        bug!("encountered PhantomDeref in is_mutable")
                     }
                     // Check as the inner reference type if it is a field projection
                     // from the `&pin` pattern

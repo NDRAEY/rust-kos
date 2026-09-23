@@ -231,8 +231,13 @@ fn impl_def_from_trait(
         IgnoreAssocItems::DocHiddenAttrPresent
     };
 
-    let trait_items =
-        filter_assoc_items(sema, &trait_.items(sema.db), DefaultMethods::No, ignore_items);
+    let trait_items = filter_assoc_items(
+        sema,
+        trait_,
+        &ide_db::traits::trait_items_with_required(sema.db, trait_),
+        DefaultMethods::No,
+        ignore_items,
+    );
 
     if trait_items.is_empty() {
         return None;
@@ -248,6 +253,7 @@ fn impl_def_from_trait(
         trait_,
         &impl_def,
         &target_scope,
+        DefaultMethods::No,
     );
     let assoc_item_list = if let Some((first, other)) = assoc_items.split_first() {
         let first_item = if let ast::AssocItem::Fn(func) = first

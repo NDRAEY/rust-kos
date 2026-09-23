@@ -53,12 +53,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let intrinsic_name = this.tcx.item_name(instance.def_id());
         let intrinsic_name = intrinsic_name.as_str();
 
-        // FIXME: avoid allocating memory
-        let dest = this.force_allocation(dest)?;
-
-        let res =
-            this.emulate_intrinsic_by_name(intrinsic_name, instance.args, args, &dest, ret)?;
-        res.jump_to_next_block(this, &dest, ret, Some(unwind), |this| {
+        let res = this.emulate_intrinsic_by_name(intrinsic_name, instance.args, args, dest, ret)?;
+        res.jump_to_next_block(this, dest, ret, Some(unwind), |this| {
             // We haven't handled the intrinsic, let's see if we can use a fallback body.
             if this.tcx.intrinsic(instance.def_id()).unwrap().must_be_overridden {
                 throw_unsup_format!("unimplemented intrinsic: `{intrinsic_name}`")
@@ -88,7 +84,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         intrinsic_name: &str,
         generic_args: ty::GenericArgsRef<'tcx>,
         args: &[OpTy<'tcx>],
-        dest: &MPlaceTy<'tcx>,
+        dest: &PlaceTy<'tcx>,
         ret: Option<mir::BasicBlock>,
     ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
@@ -165,14 +161,14 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         let link_name = this.tcx.codegen_fn_attrs(instance.def_id()).symbol_name.unwrap();
 
-        // FIXME: avoid allocating memory
+        // These are anyway mostly vector intrinsics and vectors live in memory.
         let dest = this.force_allocation(dest)?;
 
         let res = 'handled: {
             match link_name.as_str() {
                 // LLVM intrinsics
                 "llvm.prefetch.p0" => {
-                    let [p, rw, loc, ty] = this.check_shim_sig_unadjusted(link_name, args)?;
+                    let [p, rw, loc, ty] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
 
                     let _ = this.read_pointer(p)?;
                     let rw = this.read_scalar(rw)?.to_i32()?;
@@ -202,7 +198,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 name if name.starts_with("llvm.ctpop.v")
                     && this.tcx.sess.target.endian == Endian::Little =>
                 {
-                    let [op] = this.check_shim_sig_unadjusted(link_name, args)?;
+                    let [op] = this.check_shim_sig_llvm_intrinsic(link_name, args)?;
 
                     let (op, op_len) = this.project_to_simd(op)?;
                     let (dest, dest_len) = this.project_to_simd(&dest)?;
@@ -250,7 +246,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         };
 
         // The rest either implements the logic, or falls back to `lookup_exported_symbol`.
-        res.jump_to_next_block(this, &dest, ret, None, |this| {
+        res.jump_to_next_block(this, &dest.clone().into(), ret, None, |this| {
             throw_machine_stop!(TerminationInfo::UnsupportedForeignItem(format!(
                 "can't call LLVM intrinsic `{link_name}` on architecture `{arch}`",
                 arch = this.tcx.sess.target.arch,

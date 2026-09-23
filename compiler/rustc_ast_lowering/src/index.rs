@@ -5,9 +5,9 @@ use rustc_hir::def_id::{LocalDefId, LocalDefIdMap};
 use rustc_hir::intravisit::Visitor;
 use rustc_hir::*;
 use rustc_index::IndexVec;
-use rustc_middle::span_bug;
 use rustc_middle::ty::TyCtxt;
-use rustc_span::{DUMMY_SP, Span};
+use rustc_span::def_id::CRATE_MOD_ID;
+use rustc_span::{DUMMY_SP, Span, span_bug};
 use tracing::{debug, instrument};
 
 /// A visitor that walks over the HIR and collects `Node`s into a HIR map.
@@ -49,9 +49,7 @@ pub(super) fn index_hir<'hir>(
     };
 
     match item {
-        OwnerNode::Crate(citem) => {
-            collector.visit_mod(citem, citem.spans.inner_span, hir::CRATE_HIR_ID)
-        }
+        OwnerNode::Crate(citem) => collector.visit_mod(citem, citem.spans.inner_span, CRATE_MOD_ID),
         OwnerNode::Item(item) => collector.visit_item(item),
         OwnerNode::TraitItem(item) => collector.visit_trait_item(item),
         OwnerNode::ImplItem(item) => collector.visit_impl_item(item),
@@ -430,5 +428,29 @@ impl<'a, 'hir> Visitor<'hir> for NodeCollector<'a, 'hir> {
             ),
         }
         intravisit::walk_precise_capturing_arg(self, arg);
+    }
+
+    fn visit_test_binder_forall(&mut self, forall: &'hir TestBinderForall<'hir>) {
+        self.insert(forall.span, forall.hir_id, Node::TestBinderForall(forall));
+        self.with_parent(forall.hir_id, |this| intravisit::walk_test_binder_forall(this, forall))
+    }
+
+    fn visit_test_binder_exists(&mut self, exists: &'hir TestBinderExists<'hir>) {
+        self.insert(exists.span, exists.hir_id, Node::TestBinderExists(exists));
+        self.with_parent(exists.hir_id, |this| intravisit::walk_test_binder_exists(this, exists))
+    }
+
+    fn visit_test_binder_bound_type_constraint(
+        &mut self,
+        bound_type: &'hir TestBinderBoundTypeConstraint<'hir>,
+    ) {
+        self.insert(
+            bound_type.span,
+            bound_type.hir_id,
+            Node::TestBinderBoundTypeConstraint(bound_type),
+        );
+        self.with_parent(bound_type.hir_id, |this| {
+            intravisit::walk_test_binder_bound_type_constraint(this, bound_type)
+        })
     }
 }

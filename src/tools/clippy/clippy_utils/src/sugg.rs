@@ -14,7 +14,7 @@ use rustc_lint::{EarlyContext, LateContext, LintContext};
 use rustc_middle::hir::place::ProjectionKind;
 use rustc_middle::mir::{FakeReadCause, Mutability};
 use rustc_middle::ty;
-use rustc_span::{BytePos, CharPos, Pos, Span, SyntaxContext};
+use rustc_span::{BytePos, CharPos, Pos as _, Span, SyntaxContext};
 use std::borrow::Cow;
 use std::fmt::{self, Display, Write as _};
 use std::ops::{Add, Neg, Not, Sub};
@@ -72,8 +72,8 @@ impl<'a> Sugg<'a> {
     ///
     /// - Applicability level `Unspecified` will never be changed.
     /// - If the span is inside a macro, change the applicability level to `MaybeIncorrect`.
-    /// - If the default value is used and the applicability level is `MachineApplicable`, change it
-    ///   to `HasPlaceholders`
+    /// - If the default value is used and the applicability level is `MachineApplicable`, change it to
+    ///   `HasPlaceholders`
     pub fn hir_with_applicability(
         cx: &LateContext<'_>,
         expr: &hir::Expr<'_>,
@@ -744,7 +744,7 @@ pub trait DiagExt<T: LintContext> {
     fn suggest_remove_item(&mut self, cx: &T, item: Span, msg: &str, applicability: Applicability);
 }
 
-impl<T: LintContext> DiagExt<T> for rustc_errors::Diag<'_, ()> {
+impl<T: LintContext> DiagExt<T> for rustc_errors::Diag<'_> {
     fn suggest_item_with_attr<D: Display + ?Sized>(
         &mut self,
         cx: &T,
@@ -966,8 +966,8 @@ impl<'tcx> Delegate<'tcx> for DerefDelegate<'_, 'tcx> {
                 // Note about method calls:
                 // - compiler automatically dereference references if the target type is a reference (works also for
                 //   function call)
-                // - `self` arguments in the case of `x.is_something()` are also automatically (de)referenced, and
-                //   no projection should be suggested
+                // - `self` arguments in the case of `x.is_something()` are also automatically (de)referenced, and no
+                //   projection should be suggested
                 if let Some(parent_expr) = get_parent_expr_for_hir(self.cx, cmt.hir_id) {
                     match &parent_expr.kind {
                         // given expression is the self argument and will be handled completely by the compiler

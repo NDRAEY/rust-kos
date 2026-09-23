@@ -9,12 +9,11 @@ use rustc_abi::{
     LayoutCalculatorError, LayoutData, Niche, ReprOptions, Scalar, Size, StructKind, TagEncoding,
     VariantIdx, Variants, WrappingRange,
 };
-use rustc_data_structures::Limit;
+use rustc_attr_ir::lang_items::LangItem;
 use rustc_hashes::Hash64;
 use rustc_hir as hir;
 use rustc_hir::find_attr;
 use rustc_index::{Idx as _, IndexVec};
-use rustc_middle::bug;
 use rustc_middle::query::Providers;
 use rustc_middle::traits::ObligationCause;
 use rustc_middle::ty::layout::{
@@ -26,7 +25,8 @@ use rustc_middle::ty::{
     TypeVisitableExt, Unnormalized,
 };
 use rustc_session::{DataTypeKind, FieldInfo, FieldKind, SizeKind, VariantInfo};
-use rustc_span::{Symbol, sym};
+use rustc_span::{Symbol, bug, sym};
+use rustc_structures::Limit;
 use tracing::{debug, instrument};
 
 use crate::diagnostics::NonPrimitiveSimdType;
@@ -130,7 +130,7 @@ fn map_error<'tcx>(
             // This is sometimes not a compile error if there are trivially false where clauses.
             // See `tests/ui/layout/trivial-bounds-sized.rs` for an example.
             assert!(field.layout.is_unsized(), "invalid layout error {err:#?}");
-            if cx.typing_env.param_env.caller_bounds().is_empty() {
+            if cx.typing_env.param_env.is_empty() {
                 cx.tcx().dcx().delayed_bug(format!(
                     "encountered unexpected unsized field in layout of {ty:?}: {field:#?}"
                 ));
@@ -738,7 +738,7 @@ fn layout_of_uncached<'tcx>(
                         .is_sized(tcx, typing_env)
                 });
 
-            let layout = cx
+            let mut layout = cx
                 .calc
                 .layout_of_struct_or_enum(
                     &def.repr(),
@@ -805,6 +805,13 @@ fn layout_of_uncached<'tcx>(
                 }
             }
 
+            if tcx.is_lang_item(def.did(), LangItem::F16B) {
+                let bfloat = scalar_unit(Primitive::Float(abi::Float::F16B));
+                assert_eq!(layout.size, abi::Float::F16B.size());
+                layout.align = abi::Float::F16B.align(cx);
+                layout.backend_repr = BackendRepr::Scalar(bfloat);
+            }
+
             tcx.mk_layout(layout)
         }
 
@@ -829,7 +836,7 @@ fn layout_of_uncached<'tcx>(
             // Due to trivial bounds, this can even be the case if the alias does not reference
             // any generic parameters, e.g. a `for<'a> u32: Trait<'a>` where-bound means that
             // `<u32 as Trait<'static>>::Assoc` is rigid.
-            let err = if ty.has_param() || !cx.typing_env.param_env.caller_bounds().is_empty() {
+            let err = if ty.has_param() || !cx.typing_env.param_env.is_empty() {
                 LayoutError::TooGeneric(ty)
             } else {
                 LayoutError::ReferencesError(cx.tcx().dcx().delayed_bug(format!(
@@ -850,7 +857,7 @@ fn record_layout_for_printing<'tcx>(cx: &LayoutCx<'tcx>, layout: TyAndLayout<'tc
     // Ignore layouts that are done with non-empty environments or
     // non-monomorphic layouts, as the user only wants to see the stuff
     // resulting from the final codegen session.
-    if layout.ty.has_non_region_param() || !cx.typing_env.param_env.caller_bounds().is_empty() {
+    if layout.ty.has_non_region_param() || !cx.typing_env.param_env.is_empty() {
         return;
     }
 

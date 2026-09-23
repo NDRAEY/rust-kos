@@ -4,10 +4,10 @@ use either::Either;
 use hir::{ExprKind, Param};
 use rustc_abi::FieldIdx;
 use rustc_errors::{Applicability, Diag};
+use rustc_hir::attrs::lang_items::LangItem;
 use rustc_hir::def_id::DefId;
 use rustc_hir::intravisit::Visitor;
 use rustc_hir::{self as hir, BindingMode, ByRef, Expr, Node};
-use rustc_middle::bug;
 use rustc_middle::hir::place::PlaceBase;
 use rustc_middle::mir::visit::PlaceContext;
 use rustc_middle::mir::{
@@ -16,7 +16,7 @@ use rustc_middle::mir::{
     StatementKind, TerminatorKind,
 };
 use rustc_middle::ty::{self, InstanceKind, Ty, TyCtxt, Upcast};
-use rustc_span::{BytePos, DesugaringKind, Span, Symbol, kw, sym};
+use rustc_span::{BytePos, DesugaringKind, Span, Symbol, bug, kw, sym};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::infer::InferCtxtExt;
 use rustc_trait_selection::traits;
@@ -179,6 +179,15 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                         reason = String::new();
                     }
                 }
+            }
+
+            PlaceRef { local: _, projection: [ProjectionElem::PhantomDeref] } => {
+                item_msg = String::new();
+                reason = String::new();
+            }
+            PlaceRef { local: _, projection: [_proj_base @ .., ProjectionElem::PhantomDeref] } => {
+                item_msg = String::new();
+                reason = String::new();
             }
 
             PlaceRef {
@@ -1227,7 +1236,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                 tcx.clauses_of(callee_def_id).instantiate(tcx, generic_args).clauses.iter().any(
                     |clause| {
                         clause.as_trait_clause().is_some_and(|trait_pred| {
-                            trait_pred.polarity() == ty::PredicatePolarity::Positive
+                            trait_pred.polarity() == ty::ClausePolarity::Positive
                                 && tcx.fn_trait_kind_from_def_id(trait_pred.def_id())
                                     == Some(ty::ClosureKind::Fn)
                                 && trait_pred.self_ty().skip_binder().peel_refs()
@@ -1337,7 +1346,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                     kind: hir::ImplItemKind::Fn(sig, _),
                     ..
                 }) => {
-                    err.span_label(ident.span, "");
+                    err.span_context(ident.span);
                     err.span_label(
                         sig.decl.output.span(),
                         "change this to return `FnMut` instead of `Fn`",
@@ -1630,7 +1639,8 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
             match self
                 .infcx
                 .type_implements_trait_shallow(clone_trait, ty.peel_refs(), self.infcx.param_env)
-                .as_deref()
+                .as_ref()
+                .map(|it| it.as_slice())
             {
                 Some([]) => {
                     // FIXME: This error message isn't useful, since we're just
@@ -1927,11 +1937,11 @@ fn suggest_ampmut<'tcx>(
                     &call.kind
                 && let ty::FnDef(method_def_id, method_args) = *const_operand.ty().kind()
                 && let Some(trait_) = tcx.trait_of_assoc(method_def_id)
-                && tcx.is_lang_item(trait_, hir::LangItem::Index)
+                && tcx.is_lang_item(trait_, LangItem::Index)
             {
                 let trait_ref = ty::TraitRef::from_assoc(
                     tcx,
-                    tcx.require_lang_item(hir::LangItem::IndexMut, rhs_span),
+                    tcx.require_lang_item(LangItem::IndexMut, rhs_span),
                     method_args.no_bound_vars().unwrap(),
                 );
                 // The type only implements `Index` but not `IndexMut`, we must not suggest `&mut`.

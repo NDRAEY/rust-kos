@@ -351,11 +351,10 @@ const PERMITTED_RUSTC_DEPENDENCIES: &[&str] = &[
     "gimli",
     "gsgdt",
     "hashbrown",
-    "icu_collections",
     "icu_list",
-    "icu_locale",
     "icu_locale_core",
-    "icu_locale_data",
+    "icu_locale_fallback",
+    "icu_locale_fallback_data",
     "icu_provider",
     "ident_case",
     "indexmap",
@@ -370,7 +369,7 @@ const PERMITTED_RUSTC_DEPENDENCIES: &[&str] = &[
     "jiff-tzdb-platform",
     "jobserver",
     "lazy_static",
-    "leb128",
+    "leb128fmt",
     "libc",
     "libloading",
     "linux-raw-sys",
@@ -403,7 +402,6 @@ const PERMITTED_RUSTC_DEPENDENCIES: &[&str] = &[
     "ppv-lite86",
     "proc-macro-hack",
     "proc-macro2",
-    "psm",
     "pulldown-cmark",
     "pulldown-cmark-escape",
     "punycode",
@@ -433,6 +431,7 @@ const PERMITTED_RUSTC_DEPENDENCIES: &[&str] = &[
     "scoped-tls",
     "scopeguard",
     "self_cell",
+    "semver",
     "serde",
     "serde_core",
     "serde_derive",
@@ -446,7 +445,6 @@ const PERMITTED_RUSTC_DEPENDENCIES: &[&str] = &[
     "simd-adler32",
     "smallvec",
     "stable_deref_trait",
-    "stacker",
     "static_assertions",
     "strsim",
     "syn",
@@ -483,7 +481,6 @@ const PERMITTED_RUSTC_DEPENDENCIES: &[&str] = &[
     "unicode-script",
     "unicode-security",
     "unicode-width",
-    "utf8_iter",
     "utf8parse",
     "valuable",
     "version_check",
@@ -501,16 +498,7 @@ const PERMITTED_RUSTC_DEPENDENCIES: &[&str] = &[
     "windows-result",
     "windows-strings",
     "windows-sys",
-    "windows-targets",
     "windows-threading",
-    "windows_aarch64_gnullvm",
-    "windows_aarch64_msvc",
-    "windows_i686_gnu",
-    "windows_i686_gnullvm",
-    "windows_i686_msvc",
-    "windows_x86_64_gnu",
-    "windows_x86_64_gnullvm",
-    "windows_x86_64_msvc",
     "wit-bindgen-rt@0.39.0", // pinned to a specific version due to using a binary blob: <https://github.com/rust-lang/rust/pull/136395#issuecomment-2692769062>
     "writeable",
     "yoke",
@@ -536,6 +524,7 @@ const PERMITTED_STDLIB_DEPENDENCIES: &[&str] = &[
     "cfg-if",
     "compiler_builtins",
     "dlmalloc",
+    "find-msvc-tools", // via cc
     "foldhash", // FIXME: only appears in Cargo.lock due to https://github.com/rust-lang/cargo/issues/10801
     "fortanix-sgx-abi",
     "getopts",
@@ -719,8 +708,15 @@ fn check_proc_macro_dep_list(root: &Path, cargo: &Path, bless: bool, check: &mut
     // Remove the proc-macro crates themselves
     proc_macro_deps.retain(|pkg| !is_proc_macro_pkg(&metadata[pkg]));
     // Sort and deduplicate the crate names.
-    let proc_macro_deps =
-        proc_macro_deps.into_iter().map(|dep| metadata[dep].name.as_ref()).collect::<BTreeSet<_>>();
+    // Cargo package names may contain `-`, but will normalize these to `_` before passing to rustc.
+    // As bootstrap parses the `--crate-name` flag, use the name of the actual lib target which has
+    // been normalized.
+    let proc_macro_deps = proc_macro_deps
+        .into_iter()
+        .filter_map(|dep| {
+            metadata[dep].targets.iter().find_map(|target| target.is_lib().then_some(&target.name))
+        })
+        .collect::<BTreeSet<_>>();
 
     let expected = {
         use std::fmt::Write;

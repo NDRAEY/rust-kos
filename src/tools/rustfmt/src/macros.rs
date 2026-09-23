@@ -27,6 +27,7 @@ use crate::config::StyleEdition;
 use crate::config::lists::*;
 use crate::expr::{RhsAssignKind, rewrite_array, rewrite_assign_rhs};
 use crate::header::{HeaderPart, format_header};
+use crate::is_nightly_channel;
 use crate::lists::{ListFormatting, itemize_list, write_list};
 use crate::overflow;
 use crate::parse::macros::cfg_select::{CfgSelectFormatPredicate, parse_cfg_select_arms};
@@ -247,7 +248,7 @@ fn rewrite_macro_inner(
         }
     }
 
-    if macro_name.ends_with("cfg_select!") {
+    if is_nightly_channel!() && macro_name.ends_with("cfg_select!") {
         match format_cfg_select(context, shape, mac.span(), &macro_name, style, ts.clone()) {
             Ok(rw) => return Ok(rw),
             Err(err) => match err {
@@ -453,7 +454,7 @@ pub(crate) fn rewrite_macro_def(
     };
 
     let mut header = if def.macro_rules {
-        let pos = context.snippet_provider.span_after(span, "macro_rules!");
+        let pos = context.snippet_provider.span_after(span, "!");
         vec![HeaderPart::new("macro_rules!", span.with_hi(pos))]
     } else {
         let macro_lo = context.snippet_provider.span_before(span, "macro");
@@ -1360,15 +1361,13 @@ impl MacroBranch {
         } else {
             shape.indent.block_indent(&config)
         };
-        let new_width = config.max_width() - body_indent.width();
-        config.set().max_width(new_width);
+        config.reduce_max_width(body_indent.width());
 
         // First try to format as items, then as statements.
         let new_body_snippet = match crate::format_snippet(&body_str, &config, true) {
             Some(new_body) => new_body,
             None => {
-                let new_width = new_width + config.tab_spaces();
-                config.set().max_width(new_width);
+                config.increase_max_width(config.tab_spaces());
                 match crate::format_code_block(&body_str, &config, true) {
                     Some(new_body) => new_body,
                     None => {
@@ -1381,7 +1380,12 @@ impl MacroBranch {
             }
         };
 
-        if !filtered_str_fits(&new_body_snippet.snippet, config.max_width(), shape) {
+        if !filtered_str_fits(
+            &new_body_snippet.snippet,
+            config.max_width(),
+            context.config.tab_spaces(),
+            shape,
+        ) {
             return Err(RewriteError::ExceedsMaxWidth {
                 configured_width: shape.width,
                 span: self.span,
